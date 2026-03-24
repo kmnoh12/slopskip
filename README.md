@@ -1,54 +1,182 @@
 # SlopSkip
 
-SlopSkip은 숏폼 피드에서 페이지에 이미 보이거나 임베디드된 텍스트 신호만 읽어, AI 슬롭 가능성이 높은 콘텐츠를 로컬에서 점수화하고 건너뛰는 Chrome 확장 MVP입니다.
+[한국어 README 보기](./README.ko.md)
 
-현재 지원 범위:
-- TikTok Web: 자동 판정 + 자동 스킵 MVP
-- Instagram Reels Web: probe/debug 전용
+SlopSkip is a Chrome extension that tries to detect likely AI slop in short-form feeds and skip it locally on your machine.
 
-## 핵심 기능
+This project is still an MVP. The current goal is not perfect AI detection. The goal is to build a practical, local-first filter that works well enough on real feeds.
 
-- 공식 AI 라벨, 캡션, 해시태그, 현재 보이는 댓글, 로컬 creator vote를 기반으로 점수 계산
-- English / Korean 로케일 파일과 언어 휴리스틱 기반 규칙 분리
-- dry-run 모드와 on-page debug overlay
-- creator 로컬 allow/slop 투표
-- 외부 서버 전송 없는 local-first 동작
+## What It Does
 
-## 설치
+- Scores short-form posts using visible signals such as:
+  - official AI labels
+  - caption text
+  - hashtags
+  - comment reactions
+  - creator allow/block votes
+- Supports English and Korean-focused heuristics
+- Runs locally in the browser
+- Lets you tune filter strength
+- Lets you mark creators as:
+  - always filter
+  - always allow
 
-1. `npm install`
-2. `npm run build`
-3. Chrome에서 `chrome://extensions` 열기
-4. Developer mode 켜기
-5. `C:\Users\kmnoh\slopskip\dist`를 Load unpacked로 불러오기
+## Current Platform Status
 
-## 사용법
+- TikTok Web
+  - auto scoring
+  - auto skip MVP
+- Instagram Reels Web
+  - reels probe
+  - caption/comment signal collection
+  - ongoing tuning for auto skip behavior
 
-- TikTok 또는 Instagram Reel 페이지를 연 뒤 popup에서 `Enable`, `Dry-run`, `Debug`를 조정합니다.
-- `Mark creator as slop`, `Allow creator`, `Remove creator vote`로 현재 creator에 대한 로컬 투표를 저장할 수 있습니다.
-- dry-run에서는 실제 스킵 대신 “would skip” 토스트와 점수 breakdown만 보여줍니다.
-- debug mode에서는 현재 platform, active item, creator key, 점수, 매치된 규칙이 오버레이에 표시됩니다.
+## Why This Exists
 
-## 개인정보 / 권한
+Short-form feeds often contain low-effort AI content that users do not want to keep seeing. Most moderation tools are platform-controlled, opaque, or server-based.
 
-- 필요한 권한은 `storage`, `https://www.tiktok.com/*`, `https://www.instagram.com/*`입니다.
-- 확장은 페이지에 이미 렌더된 텍스트와 페이지 내 임베디드 데이터만 읽습니다.
-- creator vote와 설정은 `chrome.storage.local`에만 저장됩니다.
-- 외부 서버 전송, OCR, 비디오 프레임 분석, 클라우드 LLM 호출은 MVP에 포함되지 않습니다.
+SlopSkip takes a different approach:
 
-## 문서
+- local-first
+- user-controlled
+- explainable enough to tune
+- no cloud OCR or remote LLM dependency in the MVP
 
-- `docs/plan.md`: 실행 계획, 가정, 리스크, tradeoff
-- `docs/architecture.md`: 모듈 책임, 데이터 흐름, storage 구조
-- `docs/selectors.md`: TikTok/Reels 핵심 선택자와 fallback 전략
-- `docs/reels-probe-report.md`: Reels DOM 실측 결과와 feasibility 결론
-- `docs/testing.md`: 수동 테스트 매트릭스와 디버깅 체크리스트
+## How It Works
 
-## 향후 로드맵
+At a high level:
 
-- Reels feed auto-skip 정식 지원
-- creator vote import/export
-- 커뮤니티 기반 reputation backend
+1. The content script checks which platform page is open.
+2. A platform adapter finds the current active post.
+3. Signals are extracted from the page DOM.
+4. A scoring function combines those signals into a filter score.
+5. If the score passes the threshold, SlopSkip can skip the post.
+6. Popup and options pages let the user inspect and tune behavior.
+
+## Features
+
+- Local scoring based on captions, comments, hashtags, and visible labels
+- Creator-level allow/block voting
+- Adjustable sensitivity
+- Debug view for inspecting why a post was scored a certain way
+- Reels caption auto-expand option
+- Manual revisit pause behavior
+
+## Privacy
+
+SlopSkip is designed to be local-first.
+
+- Settings are stored in `chrome.storage.local`
+- Creator votes are stored locally
+- The MVP does not send page content to a remote AI service
+- No remote OCR pipeline is used in the current MVP
+
+## Permissions
+
+The extension currently uses:
+
+- `storage`
+- `https://www.tiktok.com/*`
+- `https://www.instagram.com/*`
+
+## Installation
+
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Build the extension:
+
+```bash
+npm run build
+```
+
+3. Open Chrome and go to:
+
+```text
+chrome://extensions
+```
+
+4. Turn on Developer mode
+5. Click `Load unpacked`
+6. Select:
+
+```text
+dist
+```
+
+## Development
+
+Build once:
+
+```bash
+npm run build
+```
+
+Watch mode:
+
+```bash
+npm run watch
+```
+
+Type check:
+
+```bash
+npm run typecheck
+```
+
+## Project Structure
+
+- `src/content`
+  - content scripts
+  - platform adapters
+  - scoring
+  - skip logic
+  - toast/debug UI
+- `src/background`
+  - background entry
+- `src/popup`
+  - quick controls
+- `src/options`
+  - detailed settings
+- `src/shared`
+  - shared constants, storage helpers, i18n helpers
+- `docs`
+  - architecture notes
+  - selector notes
+  - testing notes
+
+## Important Notes
+
+- This is heuristic-based filtering, not guaranteed truth detection.
+- False positives and false negatives are both possible.
+- Instagram Reels behavior is still being tuned carefully because feed UI state is fragile.
+- If you enable automatic caption expansion, it may briefly affect what the user sees.
+
+## Roadmap
+
+- Improve Reels skip stability
+- Improve caption and comment signal quality
+- Better creator reputation tools
+- Better import/export for local preferences
 - YouTube Shorts adapter
-- 더 많은 언어 규칙 세트
-- 선택적 경량 로컬 classifier 또는 meme hashing 보조 신호
+- More language coverage
+
+## Docs
+
+- `docs/architecture.md`
+- `docs/plan.md`
+- `docs/selectors.md`
+- `docs/reels-probe-report.md`
+- `docs/testing.md`
+
+## Language Notes
+
+GitHub does not automatically show a different README based on the visitor's language.
+
+For that reason:
+
+- `README.md` is the English version
+- `README.ko.md` is the Korean version
