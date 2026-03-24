@@ -371,7 +371,7 @@ export class ReelsProbeAdapter implements PlatformAdapter {
 
       const currentActive2 = findActiveReel();
       if (currentActive2 === activeItem) {
-        window.scrollBy({ top: window.innerHeight, behavior: "smooth" });
+        window.scrollBy({ top: window.innerHeight, behavior: "auto" });
         await wait(400);
       }
 

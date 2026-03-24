@@ -215,6 +215,16 @@ export function computeScore(
     pushMatch(matches, { reasonKey: "reasonVoteSlop", weight: 100, source: "vote", locale: "default" });
   }
 
+  if (signals.isAdvertisement) {
+    total += 100;
+    pushMatch(matches, {
+      reasonKey: "reasonAdvertisement",
+      weight: 100,
+      source: "official",
+      locale: "default"
+    });
+  }
+
   if (signals.officialAiLabel) {
     total += 90;
     pushMatch(matches, {
@@ -339,7 +349,7 @@ export function computeScore(
   total += commentTotal;
 
   const threshold = thresholdOverride ?? SENSITIVITY_THRESHOLDS[sensitivity];
-  const hardBlock = signals.officialAiLabel || creatorVote === "slop";
+  const hardBlock = signals.isAdvertisement || signals.officialAiLabel || creatorVote === "slop";
   const hasMediumSignal = matches.some((match) => match.weight >= 15);
   const shouldSkip = hardBlock || (total >= threshold && hasMediumSignal);
 

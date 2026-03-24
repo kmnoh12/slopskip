@@ -23,6 +23,7 @@ export interface ExtractedSignals {
   caption: string;
   hashtags: string[];
   comments: ExtractedComment[];
+  isAdvertisement?: boolean;
   officialAiLabel: boolean;
   officialAiTexts: string[];
   visibleTexts: string[];

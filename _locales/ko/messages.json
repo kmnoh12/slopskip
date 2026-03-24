@@ -61,6 +61,7 @@
   "optionsExportButton": { "message": "저장 데이터 보기" },
   "optionsExportButtonHelp": { "message": "현재 브라우저에 저장된 슬롭스킵 데이터를 JSON 형식으로 보여줍니다." },
   "reasonOfficialAi": { "message": "공식 AI 표시" },
+  "reasonAdvertisement": { "message": "광고 표시" },
   "reasonCaptionDisclosure": { "message": "캡션에 AI 사용 표시" },
   "reasonCaptionAiPhrase": { "message": "캡션에 AI 관련 표현" },
   "reasonCaptionSlopPhrase": { "message": "캡션에 슬롭 관련 표현" },

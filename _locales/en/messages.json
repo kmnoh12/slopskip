@@ -61,6 +61,7 @@
   "optionsExportButton": { "message": "Show saved data" },
   "optionsExportButtonHelp": { "message": "Displays the current SlopSkip data as JSON." },
   "reasonOfficialAi": { "message": "official AI label" },
+  "reasonAdvertisement": { "message": "advertisement label" },
   "reasonCaptionDisclosure": { "message": "caption mentions AI use" },
   "reasonCaptionAiPhrase": { "message": "caption uses AI wording" },
   "reasonCaptionSlopPhrase": { "message": "caption uses slop wording" },
@@ -76,5 +77,8 @@
   "reasonWouldSkip": { "message": "threshold reached" },
   "toastWouldSkip": { "message": "Preview: this would be filtered because of $1. (score $2)" },
   "toastSkipped": { "message": "Filtered because of $1. (score $2)" },
-  "toastSkipTransitionUnconfirmed": { "message": "A skip was requested, but the next post transition was not confirmed." }
+  "toastSkipTransitionUnconfirmed": { "message": "A skip was requested, but the next post transition was not confirmed." },
+  "toastManualRevisitCountdown": { "message": "You brought this slop back up. Skipping again in $1..." },
+  "toastManualRevisitCancel": { "message": "X" },
+  "toastManualRevisitCanceled": { "message": "Canceled auto-skip for this post." }
 }

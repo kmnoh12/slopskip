@@ -22,6 +22,7 @@ interface TikTokRehydration {
 
 const TIKTOK_OFFICIAL_AI_LABEL_RE = /\b(ai|aigc)\b|generated|synthetic|ai ?생성|생성 미디어|ai ?미디어|미디어 포함|ai로 만든/i;
 const AI_DISCLOSURE_RE = /\b(ai[- ]?generated|made with ai|generated with ai)\b|ai ?생성|ai로 만든/i;
+const TIKTOK_AD_RE = /\b(sponsored|advertisement|paid partnership|promoted)\b|광고|스폰서|유료 프로모션/i;
 
 function parseRehydration(): TikTokRehydration | null {
   const script = document.getElementById("__UNIVERSAL_DATA_FOR_REHYDRATION__");
@@ -119,6 +120,9 @@ export class TikTokAdapter implements PlatformAdapter {
     const officialAiVisibleTexts = uniqStrings(
       visibleTexts.filter((text) => TIKTOK_OFFICIAL_AI_LABEL_RE.test(text))
     );
+    const adVisibleTexts = uniqStrings(
+      visibleTexts.filter((text) => TIKTOK_AD_RE.test(text))
+    );
     const caption = normalizeText(
       itemStruct?.desc
       ?? itemStruct?.contents?.map((entry) => entry.desc ?? "").join(" ")
@@ -154,6 +158,7 @@ export class TikTokAdapter implements PlatformAdapter {
       caption,
       hashtags,
       comments,
+      isAdvertisement: adVisibleTexts.length > 0,
       officialAiLabel: Boolean(
         itemStruct?.IsAigc
         || (itemStruct?.aigcLabelType && itemStruct.aigcLabelType !== "0")
@@ -169,7 +174,8 @@ export class TikTokAdapter implements PlatformAdapter {
       raw: {
         jsonPresent: Boolean(json),
         locales: detectLocaleBuckets([caption, ...comments.map((comment) => comment.text)]),
-        officialAiVisibleTexts
+        officialAiVisibleTexts,
+        adVisibleTexts
       }
     };
   }
@@ -183,16 +189,16 @@ export class TikTokAdapter implements PlatformAdapter {
       .sort((a, b) => a.index - b.index)[0]?.node;
 
     if (nextItem) {
-      nextItem.scrollIntoView({ behavior: "smooth", block: "center" });
+      nextItem.scrollIntoView({ behavior: "auto", block: "center" });
       return true;
     }
 
     const scrollParent = findScrollableParent(activeItem);
     const delta = Math.max(window.innerHeight * 0.9, 640);
     if (scrollParent) {
-      scrollParent.scrollBy({ top: delta, behavior: "smooth" });
+      scrollParent.scrollBy({ top: delta, behavior: "auto" });
     } else {
-      window.scrollBy({ top: delta, behavior: "smooth" });
+      window.scrollBy({ top: delta, behavior: "auto" });
       document.documentElement.scrollTop += delta;
       document.body.scrollTop += delta;
     }

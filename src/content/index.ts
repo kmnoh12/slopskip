@@ -6,11 +6,9 @@ import { renderDebugPanel } from "./debugPanel";
 import { resolvePlatformAdapter } from "./platformRouter";
 import { computeScore } from "./scoring";
 import { waitForItemChange } from "./skip";
-import { showToast } from "./toast";
+import { hideToast, showCancelableCountdownToast, showToast } from "./toast";
 
 const adapter = resolvePlatformAdapter();
-
-/** 인스타 릴스용 디바운스 (DOM 변경이 매우 빈번하므로 더 길게) */
 const EVAL_DEBOUNCE_MS = adapter?.platform === "instagram-reels" ? 500 : 250;
 
 let storageState: StorageState | null = null;
@@ -30,6 +28,7 @@ let isExtracting = false;
 let evaluationSequence = 0;
 let commentPanelGraceItemId: string | undefined;
 let commentPanelGraceUntil = 0;
+let pendingManualReskipItemId: string | undefined;
 const skippedItemIds = new Set<string>();
 const autoSkippedItemIds = new Set<string>();
 const manuallyReviewedItemIds = new Set<string>();
@@ -62,25 +61,17 @@ function noteManualRevisitIntent(): void {
   manualRevisitIntentUntil = Date.now() + MANUAL_REVISIT_WINDOW_MS;
 }
 
-function shouldPauseForManualRevisit(itemId: string, state: StorageState): boolean {
-  if (!state.settings.pauseOnManualRevisit) {
-    return false;
-  }
+function shouldHandleManualRevisit(itemId: string, state: StorageState): boolean {
+  return (
+    state.settings.pauseOnManualRevisit
+    && Date.now() <= manualRevisitIntentUntil
+    && autoSkippedItemIds.has(itemId)
+  );
+}
 
-  if (manuallyReviewedItemIds.has(itemId)) {
-    return true;
-  }
-
-  if (Date.now() > manualRevisitIntentUntil) {
-    return false;
-  }
-
-  if (!autoSkippedItemIds.has(itemId)) {
-    return false;
-  }
-
-  manuallyReviewedItemIds.add(itemId);
-  return true;
+function clearPendingManualReskip(): void {
+  pendingManualReskipItemId = undefined;
+  hideToast();
 }
 
 function clearTransientState(): void {
@@ -95,7 +86,102 @@ function clearTransientState(): void {
   skipInFlight = false;
   commentPanelGraceItemId = undefined;
   commentPanelGraceUntil = 0;
+  clearPendingManualReskip();
   skippedItemIds.clear();
+}
+
+function getManualReskipMessage(secondsLeft: number): string {
+  const localized = chrome.i18n.getMessage("toastManualRevisitCountdown", [String(secondsLeft)]);
+  if (localized) {
+    return localized;
+  }
+  return `다시 올린 슬롭입니다. ${secondsLeft}초 후 다시 넘깁니다.`;
+}
+
+async function executeSkip(activeItem: HTMLElement, signals: ExtractedSignals, state: StorageState): Promise<void> {
+  const previousId = signals.itemId;
+  skippedItemIds.add(previousId);
+  autoSkippedItemIds.add(previousId);
+  skipInFlight = true;
+
+  try {
+    const didRequestSkip = await adapter!.skipToNext(activeItem);
+    if (!didRequestSkip) {
+      return;
+    }
+
+    let changed = await waitForItemChange(() => {
+      const newActive = adapter!.findActiveItem();
+      if (!newActive) return currentSignals?.itemId;
+      const video = newActive.querySelector("video");
+      const src = video?.src || video?.currentSrc || video?.poster || "";
+      return src ? `quick::${src}` : currentSignals?.itemId;
+    }, `quick::${_getVideoSrc(activeItem)}`, 2800);
+
+    skipCooldownUntil = Date.now() + SKIP_COOLDOWN_MS;
+
+    if (!changed) {
+      const latestActiveItem = adapter!.findActiveItem();
+      if (latestActiveItem) {
+        await adapter!.skipToNext(latestActiveItem);
+        changed = await waitForItemChange(() => {
+          const newActive = adapter!.findActiveItem();
+          if (!newActive) return currentSignals?.itemId;
+          const video = newActive.querySelector("video");
+          const src = video?.src || video?.currentSrc || video?.poster || "";
+          return src ? `quick::${src}` : currentSignals?.itemId;
+        }, `quick::${_getVideoSrc(activeItem)}`, 2200);
+      }
+    }
+
+    if (!changed) {
+      skipCooldownUntil = Date.now() + 3000;
+      if (state.settings.showToast) {
+        showToast(chrome.i18n.getMessage("toastSkipTransitionUnconfirmed"));
+      }
+    }
+  } finally {
+    skipInFlight = false;
+    lastProcessedItemId = undefined;
+  }
+}
+
+function startManualReskipCountdown(signals: ExtractedSignals, state: StorageState): void {
+  if (pendingManualReskipItemId === signals.itemId || manuallyReviewedItemIds.has(signals.itemId)) {
+    return;
+  }
+
+  pendingManualReskipItemId = signals.itemId;
+
+  showCancelableCountdownToast({
+    seconds: 3,
+    cancelLabel: chrome.i18n.getMessage("toastManualRevisitCancel") || "X",
+    getMessage: getManualReskipMessage,
+    onCancel: () => {
+      manuallyReviewedItemIds.add(signals.itemId);
+      pendingManualReskipItemId = undefined;
+      if (state.settings.showToast) {
+        const canceled = chrome.i18n.getMessage("toastManualRevisitCanceled") || "이번에는 자동 넘김을 취소했습니다.";
+        showToast(canceled);
+      }
+    },
+    onExpire: () => {
+      runSafely(async () => {
+        if (pendingManualReskipItemId !== signals.itemId) {
+          return;
+        }
+
+        pendingManualReskipItemId = undefined;
+        const latestState = storageState ?? await refreshStorageState();
+        const latestActiveItem = adapter?.findActiveItem();
+        if (!latestActiveItem || currentSignals?.itemId !== signals.itemId) {
+          return;
+        }
+
+        await executeSkip(latestActiveItem, signals, latestState);
+      });
+    }
+  });
 }
 
 async function evaluateCurrentItem(reason = "loop"): Promise<void> {
@@ -103,7 +189,6 @@ async function evaluateCurrentItem(reason = "loop"): Promise<void> {
     return;
   }
 
-  // skip 진행 중이거나 추출 중이면 evaluation 차단 (진동/연타 방지)
   if (skipInFlight || isExtracting) {
     return;
   }
@@ -151,7 +236,6 @@ async function performEvaluation(reason: string): Promise<void> {
     return;
   }
 
-  // itemId가 바뀌면 이전 릴의 상태를 클리어
   if (currentSignals && currentSignals.itemId !== signals.itemId) {
     currentSignals = null;
     currentSnapshot = null;
@@ -181,7 +265,12 @@ async function performEvaluation(reason: string): Promise<void> {
 
   renderDebugPanel(currentStatus.debugSnapshot ?? null, state.settings.debugMode);
   if (adapter.platform === "instagram-reels" && state.settings.debugMode) {
-    console.info("[SlopSkip Reels]", { itemId: signals.itemId, score: score.total, shouldSkip: score.shouldSkip, creator: signals.creator?.handle });
+    console.info("[SlopSkip Reels]", {
+      itemId: signals.itemId,
+      score: score.total,
+      shouldSkip: score.shouldSkip,
+      creator: signals.creator?.handle
+    });
   }
 
   if (adapter.platform === "instagram-reels" && signals.raw?.commentPanelTriggered) {
@@ -189,24 +278,25 @@ async function performEvaluation(reason: string): Promise<void> {
     commentPanelGraceUntil = Date.now() + 1800;
   }
 
-  // 이미 처리한 아이템이면 스킵 (force 제외)
   if (signals.itemId === lastProcessedItemId && reason !== "force") {
     return;
   }
 
   lastProcessedItemId = signals.itemId;
 
-  // 쿨다운 중이면 스킵
+  if (pendingManualReskipItemId && pendingManualReskipItemId !== signals.itemId) {
+    clearPendingManualReskip();
+  }
+
   if (Date.now() < skipCooldownUntil) {
     return;
   }
 
-  // 이미 skip 시도한 아이템이면 재시도하지 않음
   if (skippedItemIds.has(signals.itemId)) {
     return;
   }
 
-  if (shouldPauseForManualRevisit(signals.itemId, state)) {
+  if (manuallyReviewedItemIds.has(signals.itemId)) {
     return;
   }
 
@@ -219,11 +309,15 @@ async function performEvaluation(reason: string): Promise<void> {
     return;
   }
 
+  if (shouldHandleManualRevisit(signals.itemId, state)) {
+    startManualReskipCountdown(signals, state);
+    return;
+  }
+
   if (!score.shouldSkip) {
     return;
   }
 
-  // 토스트 표시
   const primaryReason = score.matches[0]?.reasonKey ?? "reasonWouldSkip";
   const localizedReason = chrome.i18n.getMessage(primaryReason) || primaryReason;
   const toastMessage = state.settings.dryRun
@@ -237,47 +331,9 @@ async function performEvaluation(reason: string): Promise<void> {
     return;
   }
 
-  // ── Skip 실행 ──
-  const previousId = signals.itemId;
-  skippedItemIds.add(previousId);
-  autoSkippedItemIds.add(previousId);
-  skipInFlight = true;
-
-  try {
-    const didRequestSkip = await adapter.skipToNext(activeItem);
-    if (!didRequestSkip) {
-      return;
-    }
-
-    // itemId 변경 대기 (최대 2초)
-    const changed = await waitForItemChange(() => {
-      // skip 중에도 findActiveItem + extractSignals를 간이 호출해서 현재 itemId 확인
-      // 하지만 여기서는 이미 갱신된 currentSignals를 쓰지 않고, 새로 찾음
-      const newActive = adapter!.findActiveItem();
-      if (!newActive) return currentSignals?.itemId;
-      const video = newActive.querySelector("video");
-      const src = video?.src || video?.currentSrc || video?.poster || "";
-      // 간이 비교: 이전 active와 같은 video이면 같은 itemId
-      return src ? `quick::${src}` : currentSignals?.itemId;
-    }, `quick::${_getVideoSrc(activeItem)}`, 2000);
-
-    skipCooldownUntil = Date.now() + SKIP_COOLDOWN_MS;
-
-    if (!changed) {
-      // 전환이 확인되지 않았지만, 재시도하지 않음 (skippedItemIds에 이미 등록됨)
-      skipCooldownUntil = Date.now() + 3000;
-      if (state.settings.showToast) {
-        showToast(chrome.i18n.getMessage("toastSkipTransitionUnconfirmed"));
-      }
-    }
-  } finally {
-    skipInFlight = false;
-    // skip 완료 후 즉시 재평가
-    lastProcessedItemId = undefined;
-  }
+  await executeSkip(activeItem, signals, state);
 }
 
-/** activeItem에서 video src를 꺼내는 헬퍼 */
 function _getVideoSrc(el: HTMLElement): string {
   const v = el.querySelector("video");
   return v?.src || v?.currentSrc || v?.poster || "";
