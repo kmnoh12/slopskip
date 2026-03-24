@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SlopSkip</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <main class="popup">
+      <header class="hero">
+        <p class="brand" data-i18n="popupBrandKo"></p>
+        <h1 data-i18n="extName"></h1>
+        <p class="subtitle" data-i18n="popupTagline"></p>
+      </header>
+
+      <section class="card">
+        <label class="switch">
+          <span class="label-with-help">
+            <span data-i18n="popupEnabled"></span>
+            <button class="help" type="button" tabindex="0" aria-label="help" data-i18n-title="popupEnabledHelp">?</button>
+          </span>
+          <input id="enabled" type="checkbox" />
+        </label>
+        <label class="switch">
+          <span class="label-with-help">
+            <span data-i18n="popupReelsAutoExpandCaption"></span>
+            <button class="help" type="button" tabindex="0" aria-label="help" data-i18n-title="popupReelsAutoExpandCaptionHelp">?</button>
+          </span>
+          <input id="reelsAutoExpandCaption" type="checkbox" />
+        </label>
+        <label class="switch">
+          <span class="label-with-help">
+            <span data-i18n="popupDebugMode"></span>
+            <button class="help" type="button" tabindex="0" aria-label="help" data-i18n-title="popupDebugModeHelp">?</button>
+          </span>
+          <input id="debugMode" type="checkbox" />
+        </label>
+        <label class="switch">
+          <span class="label-with-help">
+            <span data-i18n="popupPauseOnManualRevisit"></span>
+            <button class="help" type="button" tabindex="0" aria-label="help" data-i18n-title="popupPauseOnManualRevisitHelp">?</button>
+          </span>
+          <input id="pauseOnManualRevisit" type="checkbox" />
+        </label>
+        <label class="field">
+          <span class="label-with-help">
+            <span data-i18n="popupSensitivity"></span>
+            <button class="help" type="button" tabindex="0" aria-label="help" data-i18n-title="popupSensitivityHelp">?</button>
+          </span>
+          <select id="sensitivity">
+            <option value="conservative" data-i18n="popupSensitivityConservative"></option>
+            <option value="balanced" data-i18n="popupSensitivityBalanced"></option>
+            <option value="aggressive" data-i18n="popupSensitivityAggressive"></option>
+          </select>
+        </label>
+      </section>
+
+      <section class="card status">
+        <div>
+          <span class="label" data-i18n="popupCurrentPlatform"></span>
+          <strong id="platformText" class="value">-</strong>
+        </div>
+        <div>
+          <span class="label" data-i18n="popupCurrentCreator"></span>
+          <strong id="creatorText" class="value">-</strong>
+        </div>
+        <div>
+          <span class="label" data-i18n="popupCurrentScore"></span>
+          <strong id="scoreText" class="value">-</strong>
+        </div>
+        <div>
+          <span class="label" data-i18n="popupCurrentVote"></span>
+          <strong id="voteText" class="value">-</strong>
+        </div>
+        <p id="statusHint" class="hint" data-i18n="popupStatusLoading"></p>
+      </section>
+
+      <section class="card actions">
+        <button id="markSlop" class="danger" data-i18n="popupMarkSlop" data-i18n-title="popupMarkSlopHelp"></button>
+        <button id="markAllow" class="safe" data-i18n="popupMarkAllow" data-i18n-title="popupMarkAllowHelp"></button>
+        <button id="clearVote" data-i18n="popupClearVote" data-i18n-title="popupClearVoteHelp"></button>
+      </section>
+
+      <footer class="footer">
+        <a id="openOptions" href="#" data-i18n="popupOpenOptions" data-i18n-title="popupOpenOptionsHelp"></a>
+      </footer>
+    </main>
+    <script type="module" src="./popup.js"></script>
+  </body>
+</html>
