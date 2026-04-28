@@ -18,35 +18,35 @@
         <label class="switch">
           <span class="label-with-help">
             <span data-i18n="popupEnabled"></span>
-            <button class="help" type="button" tabindex="0" aria-label="help" data-i18n-title="popupEnabledHelp">?</button>
+            <button class="help" type="button" data-i18n-aria-label="popupEnabledHelp" data-i18n-title="popupEnabledHelp">?</button>
           </span>
           <input id="enabled" type="checkbox" />
         </label>
         <label class="switch">
           <span class="label-with-help">
             <span data-i18n="popupReelsAutoExpandCaption"></span>
-            <button class="help" type="button" tabindex="0" aria-label="help" data-i18n-title="popupReelsAutoExpandCaptionHelp">?</button>
+            <button class="help" type="button" data-i18n-aria-label="popupReelsAutoExpandCaptionHelp" data-i18n-title="popupReelsAutoExpandCaptionHelp">?</button>
           </span>
           <input id="reelsAutoExpandCaption" type="checkbox" />
         </label>
         <label class="switch">
           <span class="label-with-help">
             <span data-i18n="popupDebugMode"></span>
-            <button class="help" type="button" tabindex="0" aria-label="help" data-i18n-title="popupDebugModeHelp">?</button>
+            <button class="help" type="button" data-i18n-aria-label="popupDebugModeHelp" data-i18n-title="popupDebugModeHelp">?</button>
           </span>
           <input id="debugMode" type="checkbox" />
         </label>
         <label class="switch">
           <span class="label-with-help">
             <span data-i18n="popupPauseOnManualRevisit"></span>
-            <button class="help" type="button" tabindex="0" aria-label="help" data-i18n-title="popupPauseOnManualRevisitHelp">?</button>
+            <button class="help" type="button" data-i18n-aria-label="popupPauseOnManualRevisitHelp" data-i18n-title="popupPauseOnManualRevisitHelp">?</button>
           </span>
           <input id="pauseOnManualRevisit" type="checkbox" />
         </label>
         <label class="field">
           <span class="label-with-help">
             <span data-i18n="popupSensitivity"></span>
-            <button class="help" type="button" tabindex="0" aria-label="help" data-i18n-title="popupSensitivityHelp">?</button>
+            <button class="help" type="button" data-i18n-aria-label="popupSensitivityHelp" data-i18n-title="popupSensitivityHelp">?</button>
           </span>
           <select id="sensitivity">
             <option value="conservative" data-i18n="popupSensitivityConservative"></option>
@@ -73,6 +73,7 @@
           <span class="label" data-i18n="popupCurrentVote"></span>
           <strong id="voteText" class="value">-</strong>
         </div>
+        <div id="reasonSummary" class="reason-summary" aria-live="polite"></div>
         <p id="statusHint" class="hint" data-i18n="popupStatusLoading"></p>
       </section>
 

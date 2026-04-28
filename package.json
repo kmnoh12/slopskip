@@ -5,6 +5,9 @@
   "description": "SlopSkip Chrome extension MVP",
   "scripts": {
     "build": "node scripts/build.mjs",
+    "test": "npm run typecheck && npm run test:scoring && npm run test:storage",
+    "test:scoring": "node scripts/test-scoring.mjs",
+    "test:storage": "node scripts/test-storage.mjs",
     "watch": "node scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit"
   },
