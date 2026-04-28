@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="./docs/assets/slopskip-thumbnail-ko.png" alt="SlopSkip 로컬 우선 숏폼 피드 필터 썸네일" width="100%">
+
 # SlopSkip
 
 **숏폼 피드의 AI 슬롭을 로컬에서 걸러내는 Chrome 확장 프로그램**

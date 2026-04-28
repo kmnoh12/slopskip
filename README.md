@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="./docs/assets/slopskip-thumbnail-en.png" alt="SlopSkip local-first feed filter thumbnail" width="100%">
+
 # SlopSkip
 
 **A local-first Chrome extension that skips likely AI slop in short-form feeds.**
