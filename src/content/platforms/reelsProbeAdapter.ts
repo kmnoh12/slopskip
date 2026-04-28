@@ -6,6 +6,29 @@ import { detectLocaleBucket, detectLocaleBuckets } from "../language";
 
 const REELS_DISCLOSURE_RE = /\b(aigc|ai generated|generated with ai|made with ai|created with ai|artificial intelligence|inteligencia artificial)\b/i;
 const REELS_AI_TEXT_RE = /\b(ai|ia|aigc|artificial intelligence|inteligencia artificial|generated|generated with ai|made with ai|ai generated)\b/i;
+const MAX_ATTEMPTED_COMMENT_ITEMS = 80;
+const SKIP_TACTIC_EVENT = "slopskip:reels-skip-tactic";
+
+interface ActiveReelCandidate {
+  container: HTMLElement;
+  score: number;
+  visibleRatio: number;
+  centerDistance: number;
+  playingVideoCount: number;
+  index: number;
+}
+
+interface ReelIdentity {
+  itemId: string;
+  source: "permalink" | "video" | "element-caption";
+  hashInputLength: number;
+  elementId: number;
+  hasVideoKey: boolean;
+  hasPermalink: boolean;
+}
+
+const reelElementIds = new WeakMap<HTMLElement, number>();
+let nextReelElementId = 1;
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -67,26 +90,120 @@ function findReelContainers(): HTMLElement[] {
   return [...containers];
 }
 
+function getVisibleRatio(rect: DOMRect): number {
+  if (rect.width <= 0 || rect.height <= 0) return 0;
+
+  const visibleWidth = Math.max(0, Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0));
+  const visibleHeight = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
+  return (visibleWidth * visibleHeight) / (rect.width * rect.height);
+}
+
+function getPlayingVideoCount(container: HTMLElement): number {
+  return [...container.querySelectorAll<HTMLVideoElement>("video")]
+    .filter((video) => !video.paused && !video.ended && video.readyState > 1)
+    .length;
+}
+
+function scoreReelCandidates(containers: HTMLElement[]): ActiveReelCandidate[] {
+  const viewportCenterY = window.innerHeight / 2;
+
+  return containers.map((container, index) => {
+    const rect = container.getBoundingClientRect();
+    const centerY = rect.top + rect.height / 2;
+    const centerDistance = Math.abs(centerY - viewportCenterY);
+    const visibleRatio = getVisibleRatio(rect);
+    const playingVideoCount = getPlayingVideoCount(container);
+    const centerCloseness = Math.max(0, 1 - centerDistance / Math.max(window.innerHeight, 1));
+    const score = (visibleRatio * 1000) + (centerCloseness * 220) + (playingVideoCount * 260);
+
+    return {
+      container,
+      score,
+      visibleRatio,
+      centerDistance,
+      playingVideoCount,
+      index
+    };
+  }).sort((left, right) => right.score - left.score);
+}
+
 function findActiveReel(): HTMLElement | null {
   const containers = findReelContainers();
   if (!containers.length) return null;
   if (containers.length === 1) return containers[0];
 
-  const viewportCenterY = window.innerHeight / 2;
-  let best: HTMLElement | null = null;
-  let bestDist = Infinity;
+  return scoreReelCandidates(containers)[0]?.container ?? null;
+}
 
-  for (const container of containers) {
-    const rect = container.getBoundingClientRect();
-    const centerY = rect.top + rect.height / 2;
-    const dist = Math.abs(centerY - viewportCenterY);
-    if (dist < bestDist) {
-      bestDist = dist;
-      best = container;
+function getActiveSelectionDiagnostics(activeItem: HTMLElement | null): Record<string, unknown> {
+  const candidates = scoreReelCandidates(findReelContainers());
+  const selected = candidates.find((candidate) => candidate.container === activeItem);
+
+  return {
+    candidateCount: candidates.length,
+    selectedIndex: selected?.index,
+    selectedScore: selected ? Math.round(selected.score) : undefined,
+    selectedVisibleRatio: selected ? Number(selected.visibleRatio.toFixed(3)) : undefined,
+    selectedCenterDistance: selected ? Math.round(selected.centerDistance) : undefined,
+    selectedPlayingVideoCount: selected?.playingVideoCount,
+    topCandidates: candidates.slice(0, 3).map((candidate) => ({
+      index: candidate.index,
+      score: Math.round(candidate.score),
+      visibleRatio: Number(candidate.visibleRatio.toFixed(3)),
+      centerDistance: Math.round(candidate.centerDistance),
+      playingVideoCount: candidate.playingVideoCount
+    }))
+  };
+}
+
+function isSameReel(left: HTMLElement | null, right: HTMLElement | null): boolean {
+  return Boolean(left && right && left === right);
+}
+
+function findNextReelAfter(activeItem: HTMLElement): HTMLElement | null {
+  const containers = findReelContainers();
+  const activeRect = activeItem.getBoundingClientRect();
+  const activeCenterY = activeRect.top + activeRect.height / 2;
+
+  return containers
+    .map((container) => {
+      const rect = container.getBoundingClientRect();
+      return {
+        container,
+        top: rect.top,
+        centerY: rect.top + rect.height / 2
+      };
+    })
+    .filter((candidate) => candidate.container !== activeItem && candidate.centerY > activeCenterY + 40)
+    .sort((left, right) => left.centerY - right.centerY)[0]?.container ?? null;
+}
+
+function recordSkipTactic(name: string, moved: boolean): void {
+  window.dispatchEvent(new CustomEvent(SKIP_TACTIC_EVENT, {
+    detail: {
+      name,
+      moved,
+      at: new Date().toISOString()
     }
-  }
+  }));
+}
 
-  return best;
+async function runSkipTactic(name: string, activeItem: HTMLElement, tactic: () => void | Promise<void>, waitMs = 420): Promise<boolean> {
+  await tactic();
+  await wait(waitMs);
+  const moved = !isSameReel(findActiveReel(), activeItem);
+  recordSkipTactic(name, moved);
+  return moved;
+}
+
+function getReelElementId(activeItem: HTMLElement): number {
+  const existingId = reelElementIds.get(activeItem);
+  if (existingId) return existingId;
+
+  const nextId = nextReelElementId;
+  nextReelElementId += 1;
+  reelElementIds.set(activeItem, nextId);
+  return nextId;
 }
 
 function extractCreator(activeItem: HTMLElement): CreatorIdentity | undefined {
@@ -141,17 +258,66 @@ function extractCreator(activeItem: HTMLElement): CreatorIdentity | undefined {
   }
 }
 
-function getStableItemId(activeItem: HTMLElement, caption: string, creator?: CreatorIdentity): string {
+function extractReelPermalink(activeItem: HTMLElement): string {
+  const links = [...activeItem.querySelectorAll<HTMLAnchorElement>("a[href]")];
+  const reelLink = links
+    .map((link) => {
+      try {
+        return new URL(link.getAttribute("href") || "", window.location.origin);
+      } catch {
+        return null;
+      }
+    })
+    .find((urlObj) => {
+      if (!urlObj) return false;
+      if (urlObj.hostname !== window.location.hostname && !urlObj.hostname.includes("instagram.com")) return false;
+      return /^\/(?:reel|reels|p)\//.test(urlObj.pathname);
+    });
+
+  return reelLink ? `${reelLink.pathname}${reelLink.search}` : "";
+}
+
+function getStableItemIdentity(activeItem: HTMLElement, caption: string, creator?: CreatorIdentity): ReelIdentity {
   const video = activeItem.querySelector("video");
   const videoKey = video?.src || video?.currentSrc || video?.poster || "";
+  const permalink = extractReelPermalink(activeItem);
+  const elementId = getReelElementId(activeItem);
   const creatorKey = creator?.handle ?? "unknown";
   const captionKey = caption.slice(0, 80);
 
-  if (videoKey) {
-    return `ig::${creatorKey}::${simpleHash(videoKey)}`;
+  if (permalink) {
+    const hashInput = `${creatorKey}|${permalink}`;
+    return {
+      itemId: `ig::${creatorKey}::permalink::${simpleHash(hashInput)}`,
+      source: "permalink",
+      hashInputLength: hashInput.length,
+      elementId,
+      hasVideoKey: Boolean(videoKey),
+      hasPermalink: true
+    };
   }
 
-  return `ig::${creatorKey}::${simpleHash(window.location.pathname + captionKey)}`;
+  if (videoKey) {
+    const hashInput = `${creatorKey}|${videoKey}`;
+    return {
+      itemId: `ig::${creatorKey}::video::${simpleHash(hashInput)}`,
+      source: "video",
+      hashInputLength: hashInput.length,
+      elementId,
+      hasVideoKey: true,
+      hasPermalink: false
+    };
+  }
+
+  const hashInput = `${creatorKey}|${window.location.pathname}|${captionKey}|element:${elementId}`;
+  return {
+    itemId: `ig::${creatorKey}::element::${simpleHash(hashInput)}`,
+    source: "element-caption",
+    hashInputLength: hashInput.length,
+    elementId,
+    hasVideoKey: false,
+    hasPermalink: false
+  };
 }
 
 function extractCaptionTexts(activeItem: HTMLElement): string[] {
@@ -200,13 +366,30 @@ function isCommentPanelOpen(): boolean {
 }
 
 const attemptedCommentItemIds = new Set<string>();
+const attemptedCommentItemOrder: string[] = [];
+
+function rememberCommentAttempt(itemId: string): void {
+  if (attemptedCommentItemIds.has(itemId)) {
+    return;
+  }
+
+  attemptedCommentItemIds.add(itemId);
+  attemptedCommentItemOrder.push(itemId);
+
+  while (attemptedCommentItemOrder.length > MAX_ATTEMPTED_COMMENT_ITEMS) {
+    const oldestItemId = attemptedCommentItemOrder.shift();
+    if (oldestItemId) {
+      attemptedCommentItemIds.delete(oldestItemId);
+    }
+  }
+}
 
 async function tryOpenCommentPanel(_activeItem: HTMLElement, itemId: string): Promise<{ triggered: boolean; attempts: number }> {
   if (attemptedCommentItemIds.has(itemId)) {
     return { triggered: false, attempts: 0 };
   }
 
-  attemptedCommentItemIds.add(itemId);
+  rememberCommentAttempt(itemId);
 
   const svgs = [...document.querySelectorAll<HTMLElement>('svg[aria-label="Comment" i], svg[aria-label="댓글" i], svg[aria-label="Comments" i]')];
   if (!svgs.length) {
@@ -249,19 +432,57 @@ async function expandCaption(activeItem: HTMLElement): Promise<void> {
   }
 }
 
-function fireArrowDown(): void {
-  const target = document.body || document.documentElement;
+function fireKeyboardNavigation(key: "ArrowDown" | "PageDown" | " "): void {
+  const targets = [
+    document.activeElement,
+    document.body,
+    document.documentElement,
+    window
+  ].filter(Boolean) as Array<Element | Window>;
+
   for (const type of ["keydown", "keyup"] as const) {
-    target.dispatchEvent(
-      new KeyboardEvent(type, {
-        key: "ArrowDown",
-        code: "ArrowDown",
-        keyCode: 40,
-        bubbles: true,
-        cancelable: true
-      })
-    );
+    for (const target of targets) {
+      target.dispatchEvent(createKeyboardEvent(type, key));
+    }
   }
+}
+
+function createKeyboardEvent(type: "keydown" | "keyup", key: "ArrowDown" | "PageDown" | " "): KeyboardEvent {
+  const keyCode = key === "ArrowDown" ? 40 : key === "PageDown" ? 34 : 32;
+  const code = key === " " ? "Space" : key;
+  return new KeyboardEvent(type, {
+    key,
+    code,
+    keyCode,
+    bubbles: true,
+    cancelable: true
+  });
+}
+
+function fireWheelNavigation(): void {
+  const targets = [
+    document.activeElement,
+    document.querySelector("main"),
+    document.scrollingElement,
+    document.body,
+    window
+  ].filter(Boolean) as Array<Element | Window>;
+
+  for (const target of targets) {
+    target.dispatchEvent(new WheelEvent("wheel", {
+      deltaY: window.innerHeight,
+      bubbles: true,
+      cancelable: true
+    }));
+  }
+}
+
+function scrollNextReelIntoView(activeItem: HTMLElement): boolean {
+  const nextReel = findNextReelAfter(activeItem);
+  if (!nextReel) return false;
+
+  nextReel.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+  return true;
 }
 
 function clickNextArrowButton(): boolean {
@@ -320,11 +541,11 @@ export class ReelsProbeAdapter implements PlatformAdapter {
     const localTexts = collectVisibleText(activeItem);
     const creator = extractCreator(activeItem);
     const caption = normalizeText(captionBlocks.join(" ") || localTexts.join(" "));
-    const itemId = getStableItemId(activeItem, caption, creator);
+    const identity = getStableItemIdentity(activeItem, caption, creator);
 
     const commentPanel = commentAlreadyOpen
       ? { triggered: false, attempts: 0 }
-      : await tryOpenCommentPanel(activeItem, itemId);
+      : await tryOpenCommentPanel(activeItem, identity.itemId);
     const commentTexts = extractCommentTexts(activeItem);
 
     const hashtags = uniqStrings(caption.match(/#[\p{L}\p{N}_]+/gu) ?? []);
@@ -332,7 +553,7 @@ export class ReelsProbeAdapter implements PlatformAdapter {
     const aiDisclosureTexts = uniqStrings(localTexts.filter((text) => REELS_AI_TEXT_RE.test(text))).slice(0, 16);
 
     return {
-      itemId,
+      itemId: identity.itemId,
       platform: this.platform,
       creator,
       caption,
@@ -347,6 +568,14 @@ export class ReelsProbeAdapter implements PlatformAdapter {
       aiDisclosureTexts,
       raw: {
         containerCandidateCount: findReelContainers().length,
+        activeSelection: getActiveSelectionDiagnostics(activeItem),
+        identity: {
+          source: identity.source,
+          elementId: identity.elementId,
+          hashInputLength: identity.hashInputLength,
+          hasVideoKey: identity.hasVideoKey,
+          hasPermalink: identity.hasPermalink
+        },
         commentPanelTriggered: commentPanel.triggered,
         commentPanelAttempts: commentPanel.attempts,
         commentPanelOpen: isCommentPanelOpen()
@@ -359,23 +588,48 @@ export class ReelsProbeAdapter implements PlatformAdapter {
     try {
       await closeOverlays();
 
-      if (clickNextArrowButton()) {
-        await wait(400);
+      const tactics: Array<{ name: string; run: () => void | Promise<void>; waitMs?: number }> = [
+        {
+          name: "next-button",
+          run: () => {
+            if (!clickNextArrowButton()) {
+              recordSkipTactic("next-button-missing", false);
+            }
+          }
+        },
+        {
+          name: "arrow-down",
+          run: () => fireKeyboardNavigation("ArrowDown")
+        },
+        {
+          name: "page-down",
+          run: () => fireKeyboardNavigation("PageDown")
+        },
+        {
+          name: "wheel",
+          run: fireWheelNavigation
+        },
+        {
+          name: "scroll-next-reel",
+          run: () => {
+            if (!scrollNextReelIntoView(activeItem)) {
+              recordSkipTactic("scroll-next-reel-missing", false);
+            }
+          }
+        },
+        {
+          name: "window-scroll",
+          run: () => window.scrollBy({ top: window.innerHeight, behavior: "auto" })
+        }
+      ];
+
+      for (const tactic of tactics) {
+        if (await runSkipTactic(tactic.name, activeItem, tactic.run, tactic.waitMs)) {
+          return true;
+        }
       }
 
-      const currentActive1 = findActiveReel();
-      if (currentActive1 !== activeItem) return true;
-
-      fireArrowDown();
-      await wait(400);
-
-      const currentActive2 = findActiveReel();
-      if (currentActive2 === activeItem) {
-        window.scrollBy({ top: window.innerHeight, behavior: "auto" });
-        await wait(400);
-      }
-
-      return true;
+      return false;
     } finally {
       this._skipInProgress = false;
     }
@@ -394,13 +648,14 @@ export class ReelsProbeAdapter implements PlatformAdapter {
       commentCount: signals?.comments.length ?? 0,
       locales: signals ? detectLocaleBuckets([signals.caption, ...signals.comments.map((c) => c.text)]) : [],
       extractionNotes: [
-        "Active reel = viewport center nearest video container",
+        "Active reel = highest score from visibility, center distance, and playing video state",
         "itemId = video src hash + creator",
         "caption/comments = extracted from active item and comment dialog",
-        "skip = next button or ArrowDown fallback"
+        "skip = next button, keyboard, wheel, direct next reel, then window scroll fallback"
       ],
       probe: {
         aiVisibleTexts: signals?.officialAiTexts ?? [],
+        activeSelection: getActiveSelectionDiagnostics(activeItem),
         raw: signals?.raw
       }
     };

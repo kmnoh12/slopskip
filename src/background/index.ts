@@ -3,8 +3,12 @@ import { getStorageState, migrateStorageState, patchSettings } from "../shared/s
 import type { ExtensionSettings } from "../shared/types";
 
 chrome.runtime.onInstalled.addListener(async () => {
-  const state = await getStorageState();
-  await chrome.storage.local.set(migrateStorageState(state));
+  try {
+    const state = await getStorageState();
+    await chrome.storage.local.set(migrateStorageState(state));
+  } catch (error) {
+    console.error("[SlopSkip]", error);
+  }
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -13,9 +17,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === MESSAGE_TYPES.SET_SETTINGS) {
-    void patchSettings((message.payload ?? {}) as Partial<ExtensionSettings>).then((state) => {
-      sendResponse({ ok: true, settings: state.settings });
-    });
+    void patchSettings((message.payload ?? {}) as Partial<ExtensionSettings>)
+      .then((state) => {
+        sendResponse({ ok: true, settings: state.settings });
+      })
+      .catch((error) => {
+        console.error("[SlopSkip]", error);
+        sendResponse({ ok: false });
+      });
     return true;
   }
 

@@ -1,4 +1,4 @@
-import { COMMENT_SCORE_CAP, SENSITIVITY_THRESHOLDS } from "../shared/constants";
+import { SENSITIVITY_THRESHOLDS } from "../shared/constants";
 import type { CreatorVote, ExtractedSignals, LocaleBucket, ScoreBreakdown, Sensitivity, SignalMatch } from "../shared/types";
 import { detectLocaleBucket } from "./language";
 
@@ -8,16 +8,36 @@ interface Rule {
   reasonKey: string;
 }
 
+interface UserRuleOverrides {
+  en: string[];
+  ko: string[];
+  default: string[];
+}
+
+interface PreparedUserRules {
+  en: string[];
+  ko: string[];
+  default: string[];
+}
+
+interface PreparedLearnedPhrase {
+  phrase: string;
+  score: number;
+}
+
+const MAX_RULES_PER_LOCALE_TO_SCORE = 400;
+const MAX_LEARNED_PHRASES_TO_SCORE = 400;
+
 const captionDisclosureRules: Rule[] = [
   { pattern: /\b(ai[- ]?generated|generated with ai|made with ai|created with ai|ai assisted)\b/i, weight: 55, reasonKey: "reasonCaptionDisclosure" },
   { pattern: /\b(prompt(ed)? with ai|midjourney|chatgpt art|stable diffusion)\b/i, weight: 40, reasonKey: "reasonCaptionAiPhrase" },
-  { pattern: /\b(ai로 만든|ai ?생성|ai ?영상|ai ?작품)\b/i, weight: 40, reasonKey: "reasonCaptionAiPhrase" },
-  { pattern: /\b(ai 슬롭|ai slop|prompt slop|dead internet)\b/i, weight: 18, reasonKey: "reasonCaptionSlopPhrase" }
+  { pattern: /(ai로 만든|ai ?생성|ai ?영상|ai ?작품|ai ?콘텐츠|인공지능으로 만든)/i, weight: 40, reasonKey: "reasonCaptionAiPhrase" },
+  { pattern: /(ai ?티|ai ?티남|ai ?같음|ai ?냄새|\bai slop\b|\bprompt slop\b|\bdead internet\b)/i, weight: 18, reasonKey: "reasonCaptionSlopPhrase" }
 ];
 
 const hashtagStrongRules: Rule[] = [
   { pattern: /^#?(aigenerated|aiart|aimade|madewithai|generatedwithai)$/i, weight: 25, reasonKey: "reasonHashtagStrong" },
-  { pattern: /^#?(ai영상|ai그림|ai생성|ai콘텐츠)$/i, weight: 25, reasonKey: "reasonHashtagStrong" }
+  { pattern: /^#?(ai영상|ai그림|ai생성|ai콘텐츠|ai작품|인공지능)$/i, weight: 25, reasonKey: "reasonHashtagStrong" }
 ];
 
 const hashtagWeakRules: Rule[] = [
@@ -28,8 +48,9 @@ const hashtagWeakRules: Rule[] = [
 const contradictionRules: Rule[] = [
   { pattern: /\bnot ai\b/i, weight: -25, reasonKey: "reasonContradictionNotAi" },
   { pattern: /\bthis is(n't| not) ai\b/i, weight: -25, reasonKey: "reasonContradictionNotAi" },
-  { pattern: /\bai 아니\b/i, weight: -25, reasonKey: "reasonContradictionNotAi" },
-  { pattern: /\b진짜 사람\b/i, weight: -25, reasonKey: "reasonContradictionNotAi" }
+  { pattern: /\b(real person|actually real|shot this|filmed this|not generated)\b/i, weight: -25, reasonKey: "reasonContradictionNotAi" },
+  { pattern: /(ai ?아님|ai가 ?아님|ai 아니|인공지능 ?아님|ai로 ?만든 ?거 ?아님)/i, weight: -25, reasonKey: "reasonContradictionNotAi" },
+  { pattern: /(진짜 ?사람|실제 ?사람|사람이 ?만든|직접 ?찍은|직접 ?촬영|본인이 ?찍은|실사임|실제임)/i, weight: -25, reasonKey: "reasonContradictionNotAi" }
 ];
 
 const commentStrongRulesEn: Rule[] = [
@@ -39,7 +60,7 @@ const commentStrongRulesEn: Rule[] = [
   { pattern: /\bfake or fake\b/i, weight: 22, reasonKey: "reasonCommentStrongEn" },
   { pattern: /\bis( (it|this|that))? real/i, weight: 16, reasonKey: "reasonCommentStrongEn" },
   { pattern: /\bis( (it|this|that))? fake/i, weight: 18, reasonKey: "reasonCommentStrongEn" },
-  { pattern: /^\s*ai\s*[?!]*\s*$/i, weight: 16, reasonKey: "reasonCommentStrongEn" },
+  { pattern: /^\s*ai\s*[?!]*\s*$/i, weight: 10, reasonKey: "reasonCommentWeakEn" },
   { pattern: /\b(its|it's|it is|this is|that is) ai\b/i, weight: 18, reasonKey: "reasonCommentStrongEn" },
   { pattern: /\b(this|that|it)( is| looks| s)? ai\b/i, weight: 18, reasonKey: "reasonCommentStrongEn" },
   { pattern: /\bbro( this| s| is)? ai\b/i, weight: 18, reasonKey: "reasonCommentStrongEn" },
@@ -65,17 +86,17 @@ const commentStrongRulesEn: Rule[] = [
 ];
 
 const commentStrongRulesKo: Rule[] = [
-  { pattern: /\b이거 ai\b/i, weight: 20, reasonKey: "reasonCommentStrongKo" },
-  { pattern: /\bai 같음\b/i, weight: 20, reasonKey: "reasonCommentStrongKo" },
-  { pattern: /\bai 티남\b/i, weight: 20, reasonKey: "reasonCommentStrongKo" },
-  { pattern: /\bai 합성\b/i, weight: 20, reasonKey: "reasonCommentStrongKo" },
-  { pattern: /\bai 영상이네\b/i, weight: 20, reasonKey: "reasonCommentStrongKo" },
-  { pattern: /\bai로 만든 거\b/i, weight: 20, reasonKey: "reasonCommentStrongKo" },
-  { pattern: /\bai충\b/i, weight: 20, reasonKey: "reasonCommentStrongKo" }
+  { pattern: /(이거|이건|저거|저건|그거|그건)\s*ai/i, weight: 20, reasonKey: "reasonCommentStrongKo" },
+  { pattern: /ai\s*(같음|같은데|같다|같네|티남|티\s*남|티\s*나|느낌|냄새)/i, weight: 20, reasonKey: "reasonCommentStrongKo" },
+  { pattern: /ai\s*(합성|생성|영상|그림|작품|콘텐츠)/i, weight: 20, reasonKey: "reasonCommentStrongKo" },
+  { pattern: /ai로\s*(만든|만듦|생성한)/i, weight: 20, reasonKey: "reasonCommentStrongKo" },
+  { pattern: /(너무|개|완전)\s*ai/i, weight: 18, reasonKey: "reasonCommentStrongKo" },
+  { pattern: /(가짜\s*같|진짜\s*아닌|사람\s*아닌|합성\s*같)/i, weight: 18, reasonKey: "reasonCommentStrongKo" },
+  { pattern: /(ai충|ai\s*충|ai슬롭|ai\s*슬롭)/i, weight: 18, reasonKey: "reasonCommentStrongKo" }
 ];
 
 const commentStrongRulesDefault: Rule[] = [
-  { pattern: /\b(esto|это)? ?(es )?(ai|ии)\b/i, weight: 20, reasonKey: "reasonCommentStrongEn" },
+  { pattern: /\b((esto|eso) es ai|это ии|это ai)\b/i, weight: 20, reasonKey: "reasonCommentStrongEn" },
   { pattern: /\bai gk sih\b/i, weight: 18, reasonKey: "reasonCommentStrongEn" },
   { pattern: /\bai nya\b/i, weight: 16, reasonKey: "reasonCommentStrongEn" },
   { pattern: /\b(isso|esse v(í|i)deo) [ée] real\b/i, weight: 16, reasonKey: "reasonCommentStrongEn" },
@@ -85,7 +106,7 @@ const commentStrongRulesDefault: Rule[] = [
   { pattern: /\bthe video is real\b/i, weight: 15, reasonKey: "reasonCommentStrongEn" } // AI meme English version
 ];
 
-const AI_LIKE_FRAGMENT_RE = /\b(ai|ia|aigc|artificial intelligence|generated|gen ai|fake|cgi|render|rendered|prompt|slop|ии)\b/i;
+const AI_LIKE_FRAGMENT_RE = /\b(ai|ia|aigc|artificial intelligence|generated|gen ai|fake|cgi|render|rendered|prompt|slop|ии)\b|인공지능|합성|생성형/i;
 
 function pushMatch(matches: SignalMatch[], match: SignalMatch): void {
   matches.push(match);
@@ -141,6 +162,7 @@ function extractSuspicionFeatures(text: string): string[] {
   if (/\bits ai\b/i.test(text)) features.add("its_ai");
   if (/\b(fake|not real|looks fake|cgi|render)\b/i.test(text)) features.add("fake_cluster");
   if (/\b(ai|ia|ии|aigc|generated|prompt|slop)\b/i.test(text)) features.add("ai_cluster");
+  if (/(ai|인공지능).*(같|티|합성|생성|가짜)|(?:가짜|합성).*(같|티)/i.test(text)) features.add("ko_ai_cluster");
   return [...features];
 }
 
@@ -163,28 +185,140 @@ function scoreSuspicionFeatures(text: string, locale: LocaleBucket, matches: Sig
   return total;
 }
 
+function countContradictionSignals(matches: SignalMatch[]): number {
+  return matches.filter((match) => match.source === "contradiction" && match.weight < 0).length;
+}
+
 function scoreLearnedPhrases(
   text: string,
   locale: LocaleBucket,
   matches: SignalMatch[],
-  learnedPhraseScores: Record<string, number>
+  learnedPhrases: PreparedLearnedPhrase[]
 ): number {
   let total = 0;
-  for (const [phrase, rawScore] of Object.entries(learnedPhraseScores)) {
-    if (!phrase || rawScore === 0) continue;
-    if (!text.includes(phrase)) continue;
 
-    const weight = rawScore > 0 ? rawScore * 4 : rawScore * 3;
+  for (const learnedPhrase of learnedPhrases) {
+    if (!phraseMatchesText(text, learnedPhrase.phrase)) continue;
+
+    const weight = learnedPhrase.score > 0 ? learnedPhrase.score * 4 : learnedPhrase.score * 3;
     total += weight;
     pushMatch(matches, {
-      reasonKey: rawScore > 0 ? "reasonCommentStrongEn" : "reasonContradictionNotAi",
+      reasonKey: learnedPhrase.score > 0 ? "reasonCommentStrongEn" : "reasonContradictionNotAi",
       weight,
       source: "comments",
+      locale,
+      excerpt: learnedPhrase.phrase
+    });
+  }
+  return Math.max(-24, Math.min(24, total));
+}
+
+function normalizeUserPhrase(phrase: string): string {
+  return normalizeCommentText(phrase).slice(0, 160);
+}
+
+function prepareUserRules(ruleOverrides: UserRuleOverrides): PreparedUserRules {
+  return {
+    en: prepareUserRuleList(ruleOverrides.en),
+    ko: prepareUserRuleList(ruleOverrides.ko),
+    default: prepareUserRuleList(ruleOverrides.default)
+  };
+}
+
+function prepareUserRuleList(phrases: string[]): string[] {
+  const seenPhrases = new Set<string>();
+  const prepared: string[] = [];
+
+  for (const phrase of phrases) {
+    const normalizedPhrase = normalizeUserPhrase(phrase);
+    if (!normalizedPhrase || seenPhrases.has(normalizedPhrase)) continue;
+    seenPhrases.add(normalizedPhrase);
+    prepared.push(normalizedPhrase);
+    if (prepared.length >= MAX_RULES_PER_LOCALE_TO_SCORE) {
+      break;
+    }
+  }
+
+  return prepared.sort((left, right) => right.length - left.length);
+}
+
+function prepareLearnedPhrases(learnedPhraseScores: Record<string, number>): PreparedLearnedPhrase[] {
+  const seenPhrases = new Set<string>();
+  const prepared: PreparedLearnedPhrase[] = [];
+  const entries = Object.entries(learnedPhraseScores)
+    .filter(([, rawScore]) => rawScore !== 0)
+    .sort((left, right) => {
+      const scoreDelta = Math.abs(right[1]) - Math.abs(left[1]);
+      if (scoreDelta !== 0) return scoreDelta;
+      return right[0].length - left[0].length;
+    });
+
+  for (const [phrase, score] of entries) {
+    const normalizedPhrase = normalizeUserPhrase(phrase);
+    if (!normalizedPhrase || seenPhrases.has(normalizedPhrase)) continue;
+    seenPhrases.add(normalizedPhrase);
+    prepared.push({ phrase: normalizedPhrase, score });
+    if (prepared.length >= MAX_LEARNED_PHRASES_TO_SCORE) {
+      break;
+    }
+  }
+
+  return prepared;
+}
+
+function isAsciiWordChar(char: string | undefined): boolean {
+  return Boolean(char && /[a-z0-9_]/i.test(char));
+}
+
+function phraseMatchesText(text: string, phrase: string): boolean {
+  let fromIndex = 0;
+  while (fromIndex <= text.length) {
+    const index = text.indexOf(phrase, fromIndex);
+    if (index === -1) return false;
+
+    const before = text[index - 1];
+    const after = text[index + phrase.length];
+    if (!isAsciiWordChar(before) && !isAsciiWordChar(after)) {
+      return true;
+    }
+
+    fromIndex = index + phrase.length;
+  }
+
+  return false;
+}
+
+function scoreUserRuleOverrides(
+  text: string,
+  locale: LocaleBucket,
+  source: SignalMatch["source"],
+  matches: SignalMatch[],
+  ruleOverrides: PreparedUserRules
+): number {
+  const normalized = normalizeCommentText(text);
+  if (!normalized) return 0;
+
+  const candidatePhrases = [...new Set([
+    ...ruleOverrides.default,
+    ...(locale === "ko" ? ruleOverrides.ko : ruleOverrides.en)
+  ])];
+  let total = 0;
+
+  for (const phrase of candidatePhrases) {
+    if (!phraseMatchesText(normalized, phrase)) continue;
+
+    const weight = source === "caption" ? 60 : 32;
+    total += weight;
+    pushMatch(matches, {
+      reasonKey: source === "caption" ? "reasonCaptionSlopPhrase" : "reasonCommentStrongEn",
+      weight,
+      source,
       locale,
       excerpt: phrase
     });
   }
-  return Math.max(-24, Math.min(24, total));
+
+  return Math.min(source === "caption" ? 80 : 96, total);
 }
 
 export function computeScore(
@@ -192,10 +326,13 @@ export function computeScore(
   sensitivity: Sensitivity,
   creatorVote?: CreatorVote,
   thresholdOverride?: number,
-  learnedPhraseScores: Record<string, number> = {}
+  learnedPhraseScores: Record<string, number> = {},
+  ruleOverrides: UserRuleOverrides = { en: [], ko: [], default: [] }
 ): ScoreBreakdown {
   const matches: SignalMatch[] = [];
   let total = 0;
+  const preparedRuleOverrides = prepareUserRules(ruleOverrides);
+  const preparedLearnedPhrases = prepareLearnedPhrases(learnedPhraseScores);
 
   if (creatorVote === "allow") {
     pushMatch(matches, { reasonKey: "reasonVoteAllow", weight: -100, source: "vote", locale: "default" });
@@ -239,6 +376,7 @@ export function computeScore(
   const captionLocale = detectLocaleBucket(signals.caption);
   total += applyRules(signals.caption, captionDisclosureRules, "caption", captionLocale, matches);
   total += applyRules(signals.caption, contradictionRules, "contradiction", captionLocale, matches);
+  total += scoreUserRuleOverrides(signals.caption, captionLocale, "caption", matches, preparedRuleOverrides);
 
   for (const tag of signals.hashtags) {
     total += applyRules(tag, hashtagStrongRules, "hashtags", captionLocale, matches);
@@ -249,6 +387,7 @@ export function computeScore(
   let commentTotal = 0;
   let aiMentionCount = 0;
   let strongCommentSignalCount = 0;
+  let contradictionCommentCount = 0;
 
   for (const comment of signals.comments) {
     const normalized = normalizeCommentText(comment.text);
@@ -256,24 +395,34 @@ export function computeScore(
     if (!normalized || seenComments.has(key)) continue;
     seenComments.add(key);
 
-    commentTotal += applyRules(normalized, contradictionRules, "contradiction", comment.locale, matches);
+    const contradictionScore = applyRules(normalized, contradictionRules, "contradiction", comment.locale, matches);
+    commentTotal += contradictionScore;
+    if (contradictionScore < 0) {
+      contradictionCommentCount += 1;
+      continue;
+    }
 
+    let hasStrongSignalInComment = false;
     const defaultStrongScore = applyRules(normalized, commentStrongRulesDefault, "comments", comment.locale, matches);
     commentTotal += defaultStrongScore;
-    if (defaultStrongScore > 0) strongCommentSignalCount += 1;
+    if (defaultStrongScore > 0) hasStrongSignalInComment = true;
 
     const suspicionFeatureScore = scoreSuspicionFeatures(normalized, comment.locale, matches);
     commentTotal += suspicionFeatureScore;
-    if (suspicionFeatureScore >= 14) strongCommentSignalCount += 1;
+    if (suspicionFeatureScore >= 14) hasStrongSignalInComment = true;
 
-    const learnedScore = scoreLearnedPhrases(normalized, comment.locale, matches, learnedPhraseScores);
+    const learnedScore = scoreLearnedPhrases(normalized, comment.locale, matches, preparedLearnedPhrases);
     commentTotal += learnedScore;
-    if (learnedScore >= 8) strongCommentSignalCount += 1;
+    if (learnedScore >= 8) hasStrongSignalInComment = true;
+
+    const userRuleScore = scoreUserRuleOverrides(normalized, comment.locale, "comments", matches, preparedRuleOverrides);
+    commentTotal += userRuleScore;
+    if (userRuleScore > 0) hasStrongSignalInComment = true;
 
     if (comment.locale === "ko") {
       const strongScore = applyRules(normalized, commentStrongRulesKo, "comments", comment.locale, matches);
       commentTotal += strongScore;
-      if (strongScore > 0) strongCommentSignalCount += 1;
+      if (strongScore > 0) hasStrongSignalInComment = true;
       if (AI_LIKE_FRAGMENT_RE.test(normalized)) {
         aiMentionCount += 1;
         commentTotal += 8;
@@ -288,7 +437,7 @@ export function computeScore(
     } else {
       const strongScore = applyRules(normalized, commentStrongRulesEn, "comments", comment.locale, matches);
       commentTotal += strongScore;
-      if (strongScore > 0) strongCommentSignalCount += 1;
+      if (strongScore > 0) hasStrongSignalInComment = true;
       if (AI_LIKE_FRAGMENT_RE.test(normalized)) {
         aiMentionCount += 1;
         commentTotal += 6;
@@ -300,6 +449,10 @@ export function computeScore(
           excerpt: normalized.slice(0, 140)
         });
       }
+    }
+
+    if (hasStrongSignalInComment) {
+      strongCommentSignalCount += 1;
     }
   }
 
@@ -321,6 +474,17 @@ export function computeScore(
       source: "comments",
       locale: commentLocale,
       excerpt: `${aiMentionCount} comments`
+    });
+  }
+
+  if (contradictionCommentCount >= 2) {
+    commentTotal -= 20;
+    pushMatch(matches, {
+      reasonKey: "reasonContradictionNotAi",
+      weight: -20,
+      source: "contradiction",
+      locale: commentLocale,
+      excerpt: `${contradictionCommentCount} comments`
     });
   }
 
@@ -351,7 +515,10 @@ export function computeScore(
   const threshold = thresholdOverride ?? SENSITIVITY_THRESHOLDS[sensitivity];
   const hardBlock = signals.isAdvertisement || signals.officialAiLabel || creatorVote === "slop";
   const hasMediumSignal = matches.some((match) => match.weight >= 15);
-  const shouldSkip = hardBlock || (total >= threshold && hasMediumSignal);
+  const contradictionSignals = countContradictionSignals(matches);
+  const needsExtraEvidence = contradictionSignals >= 2 && !signals.officialAiLabel && !signals.isAdvertisement;
+  const hasStrongSignal = matches.some((match) => match.weight >= 25);
+  const shouldSkip = hardBlock || (total >= threshold && hasMediumSignal && (!needsExtraEvidence || hasStrongSignal));
 
   return {
     total,

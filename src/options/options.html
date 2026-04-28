@@ -9,38 +9,78 @@
   <body>
     <main class="options">
       <header class="hero">
-        <p class="brand" data-i18n="popupBrandKo"></p>
-        <h1 data-i18n="optionsTitle"></h1>
-        <p class="subtitle" data-i18n="optionsSubtitle"></p>
+        <div>
+          <p class="brand" data-i18n="popupBrandKo"></p>
+          <h1 data-i18n="optionsTitle"></h1>
+          <p class="subtitle" data-i18n="optionsSubtitle"></p>
+        </div>
+        <p id="saveStatus" class="save-status" role="status" aria-live="polite">Loading</p>
       </header>
 
-      <section class="panel">
-        <div class="section-head">
-          <h2 data-i18n="optionsThresholdTitle"></h2>
-          <button class="help" type="button" tabindex="0" aria-label="help" data-i18n-title="optionsThresholdTitleHelp">?</button>
+      <section class="overview" data-i18n-aria-label="optionsSummaryAria">
+        <div class="metric">
+          <span class="metric-label" data-i18n="optionsSummaryAutoFilter"></span>
+          <strong id="enabledSummary">-</strong>
         </div>
-        <div class="grid">
-          <label>
+        <div class="metric">
+          <span class="metric-label" data-i18n="optionsSummaryPreset"></span>
+          <strong id="sensitivitySummary">-</strong>
+        </div>
+        <div class="metric">
+          <span class="metric-label" data-i18n="optionsSummaryKeywords"></span>
+          <strong id="keywordSummary">-</strong>
+        </div>
+        <div class="metric">
+          <span class="metric-label" data-i18n="optionsSummaryCreators"></span>
+          <strong id="voteSummary">-</strong>
+        </div>
+      </section>
+
+      <section class="panel threshold-panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow" data-i18n="optionsThresholdEyebrow"></p>
+            <h2 data-i18n="optionsThresholdTitle"></h2>
+          </div>
+          <button class="help" type="button" data-i18n-aria-label="optionsThresholdTitleHelp" data-i18n-title="optionsThresholdTitleHelp">?</button>
+        </div>
+        <p class="panel-note" data-i18n="optionsThresholdBody"></p>
+        <p id="thresholdError" class="validation-message" role="alert" hidden></p>
+        <div class="threshold-stack">
+          <label class="threshold-control">
             <span data-i18n="popupSensitivityConservative" data-i18n-title="popupSensitivityConservativeHelp"></span>
-            <input id="thresholdConservative" type="number" min="0" max="200" />
+            <div class="threshold-inputs">
+              <input id="thresholdConservativeRange" type="range" min="0" max="200" step="1" />
+              <input id="thresholdConservative" type="number" min="0" max="200" inputmode="numeric" />
+            </div>
           </label>
-          <label>
+          <label class="threshold-control">
             <span data-i18n="popupSensitivityBalanced" data-i18n-title="popupSensitivityBalancedHelp"></span>
-            <input id="thresholdBalanced" type="number" min="0" max="200" />
+            <div class="threshold-inputs">
+              <input id="thresholdBalancedRange" type="range" min="0" max="200" step="1" />
+              <input id="thresholdBalanced" type="number" min="0" max="200" inputmode="numeric" />
+            </div>
           </label>
-          <label>
+          <label class="threshold-control">
             <span data-i18n="popupSensitivityAggressive" data-i18n-title="popupSensitivityAggressiveHelp"></span>
-            <input id="thresholdAggressive" type="number" min="0" max="200" />
+            <div class="threshold-inputs">
+              <input id="thresholdAggressiveRange" type="range" min="0" max="200" step="1" />
+              <input id="thresholdAggressive" type="number" min="0" max="200" inputmode="numeric" />
+            </div>
           </label>
         </div>
       </section>
 
       <section class="panel">
         <div class="section-head">
-          <h2 data-i18n="optionsRulesTitle"></h2>
-          <button class="help" type="button" tabindex="0" aria-label="help" data-i18n-title="optionsRulesTitleHelp">?</button>
+          <div>
+            <p class="eyebrow" data-i18n="optionsRulesEyebrow"></p>
+            <h2 data-i18n="optionsRulesTitle"></h2>
+          </div>
+          <button class="help" type="button" data-i18n-aria-label="optionsRulesTitleHelp" data-i18n-title="optionsRulesTitleHelp">?</button>
         </div>
-        <p class="subtitle" data-i18n="optionsRulesBody"></p>
+        <p class="panel-note" data-i18n="optionsRulesBody"></p>
+        <div id="rulesQuality" class="rules-quality" role="status" aria-live="polite"></div>
         <div class="grid two-col">
           <label>
             <span data-i18n="optionsRulesEn" data-i18n-title="optionsRulesEnHelp"></span>
@@ -60,10 +100,25 @@
       <section class="panel">
         <div class="panel-head">
           <div class="section-head">
-            <h2 data-i18n="optionsExportTitle"></h2>
-            <button class="help" type="button" tabindex="0" aria-label="help" data-i18n-title="optionsExportTitleHelp">?</button>
+            <div>
+              <p class="eyebrow" data-i18n="optionsExportEyebrow"></p>
+              <h2 data-i18n="optionsExportTitle"></h2>
+            </div>
+            <button class="help" type="button" data-i18n-aria-label="optionsExportTitleHelp" data-i18n-title="optionsExportTitleHelp">?</button>
           </div>
-          <button id="exportState" data-i18n="optionsExportButton" data-i18n-title="optionsExportButtonHelp"></button>
+          <div class="button-row">
+            <button id="exportState" data-i18n="optionsExportButton" data-i18n-title="optionsExportButtonHelp"></button>
+            <button id="copyState" type="button" data-i18n="optionsCopyJson" data-i18n-title="optionsCopyJsonHelp"></button>
+            <button id="downloadState" type="button" data-i18n="optionsDownloadJson" data-i18n-title="optionsDownloadJsonHelp"></button>
+            <button id="importState" type="button" data-i18n="optionsImportJson" data-i18n-title="optionsImportJsonHelp"></button>
+            <button id="clearCreators" type="button" data-i18n="optionsClearCreators" data-i18n-title="optionsClearCreatorsHelp"></button>
+            <button id="resetState" class="danger-zone" type="button" data-i18n="optionsResetData" data-i18n-title="optionsResetDataHelp"></button>
+            <input id="importFile" class="visually-hidden" type="file" accept="application/json,.json" />
+          </div>
+        </div>
+        <div id="undoBanner" class="undo-banner" hidden>
+          <span id="undoMessage"></span>
+          <button id="undoState" type="button" data-i18n="optionsUndo" data-i18n-title="optionsUndoHelp"></button>
         </div>
         <pre id="exportOutput" class="export">{
   "state": "empty"

@@ -1,6 +1,8 @@
-import { DEBUG_PANEL_ID } from "../shared/constants";
+﻿import { DEBUG_PANEL_ID } from "../shared/constants";
 import { MESSAGE_TYPES } from "../shared/messages";
 import type { DebugSnapshot, SignalMatch } from "../shared/types";
+
+let dragAbortController: AbortController | undefined;
 
 function escapeHtml(text: string): string {
   return text
@@ -9,14 +11,18 @@ function escapeHtml(text: string): string {
     .replace(/>/g, "&gt;");
 }
 
+function isContextInvalidatedError(error: unknown): boolean {
+  return /Extension context invalidated/i.test(error instanceof Error ? error.message : String(error));
+}
+
 function getScoreTone(total: number, threshold: number): { color: string; bg: string; label: string } {
   if (total >= threshold * 1.5) {
-    return { color: "#b42318", bg: "#fee4e2", label: "위험 매우 높음" };
+    return { color: "#b42318", bg: "#fee4e2", label: "Very high risk" };
   }
   if (total >= threshold) {
-    return { color: "#dc6803", bg: "#fef0c7", label: "차단 대상" };
+    return { color: "#dc6803", bg: "#fef0c7", label: "Filter candidate" };
   }
-  return { color: "#067647", bg: "#d1fadf", label: "기준 미만" };
+  return { color: "#067647", bg: "#d1fadf", label: "Below threshold" };
 }
 
 function aggregateMatches(matches: SignalMatch[]): Array<{ label: string; value: number }> {
@@ -34,27 +40,26 @@ function aggregateMatches(matches: SignalMatch[]): Array<{ label: string; value:
   }
 
   return [
-    { label: "공식 AI 표시", value: buckets.official },
-    { label: "캡션", value: buckets.caption },
-    { label: "해시태그", value: buckets.hashtags },
-    { label: "댓글", value: buckets.comments },
-    { label: "내 판단", value: buckets.vote },
-    { label: "반대 신호", value: buckets.contradiction }
+    { label: "Official labels", value: buckets.official },
+    { label: "Caption", value: buckets.caption },
+    { label: "Hashtags", value: buckets.hashtags },
+    { label: "Comments", value: buckets.comments },
+    { label: "Your choice", value: buckets.vote },
+    { label: "Contradictions", value: buckets.contradiction }
   ];
 }
 
 function summarizeCommentMatches(matches: SignalMatch[]): Array<{ excerpt: string; score: number }> {
-  const commentMatches = matches.filter((match) => match.source === "comments");
   const grouped = new Map<string, number>();
 
-  for (const match of commentMatches) {
+  for (const match of matches.filter((item) => item.source === "comments")) {
     const key = (match.excerpt || match.reasonKey || "comment").trim();
     grouped.set(key, (grouped.get(key) ?? 0) + match.weight);
   }
 
   return [...grouped.entries()]
     .map(([excerpt, score]) => ({ excerpt, score }))
-    .sort((a, b) => Math.abs(b.score) - Math.abs(a.score))
+    .sort((left, right) => Math.abs(right.score) - Math.abs(left.score))
     .slice(0, 10);
 }
 
@@ -79,7 +84,7 @@ function renderBars(groups: Array<{ label: string; value: number }>): string {
 
 function renderCommentCards(items: Array<{ excerpt: string; score: number }>): string {
   if (!items.length) {
-    return `<div class="slopskip-empty">아직 점수에 반영된 댓글 근거가 없습니다.</div>`;
+    return `<div class="slopskip-empty">No scored comment evidence yet.</div>`;
   }
 
   return items.map((item) => `
@@ -88,6 +93,20 @@ function renderCommentCards(items: Array<{ excerpt: string; score: number }>): s
       <div class="slopskip-comment-text">${escapeHtml(item.excerpt)}</div>
     </div>
   `).join("");
+}
+
+function renderSkipBreadcrumbs(probe?: Record<string, unknown>): string {
+  const breadcrumbs = Array.isArray(probe?.skipBreadcrumbs) ? probe.skipBreadcrumbs : [];
+  if (!breadcrumbs.length) {
+    return `<div class="slopskip-empty">No skip breadcrumbs yet.</div>`;
+  }
+
+  return breadcrumbs.map((breadcrumb) => {
+    const text = typeof breadcrumb === "object" && breadcrumb
+      ? JSON.stringify(breadcrumb)
+      : String(breadcrumb);
+    return `<span class="slopskip-chip">${escapeHtml(text)}</span>`;
+  }).join("");
 }
 
 function ensureStyles(root: HTMLElement): void {
@@ -107,9 +126,7 @@ function ensureStyles(root: HTMLElement): void {
       margin-bottom: -4px;
       cursor: grab;
     }
-    #${DEBUG_PANEL_ID} .slopskip-topbar:active {
-      cursor: grabbing;
-    }
+    #${DEBUG_PANEL_ID} .slopskip-topbar:active { cursor: grabbing; }
     #${DEBUG_PANEL_ID} .slopskip-close {
       border: 0;
       background: rgba(60, 40, 20, 0.08);
@@ -121,9 +138,7 @@ function ensureStyles(root: HTMLElement): void {
       line-height: 1;
       cursor: pointer;
     }
-    #${DEBUG_PANEL_ID} .slopskip-close:hover {
-      background: rgba(60, 40, 20, 0.16);
-    }
+    #${DEBUG_PANEL_ID} .slopskip-close:hover { background: rgba(60, 40, 20, 0.16); }
     #${DEBUG_PANEL_ID} .slopskip-card {
       background: rgba(255,255,255,0.78);
       border: 1px solid rgba(92, 69, 42, 0.12);
@@ -197,6 +212,7 @@ function ensureStyles(root: HTMLElement): void {
       padding: 10px;
       border-radius: 12px;
       background: #fbf7ef;
+      min-width: 0;
     }
     #${DEBUG_PANEL_ID} .slopskip-stat-label {
       font-size: 11px;
@@ -247,6 +263,8 @@ function ensureStyles(root: HTMLElement): void {
       padding: 6px 9px;
       font-size: 11px;
       color: #4b3b2e;
+      max-width: 100%;
+      overflow-wrap: anywhere;
     }
     #${DEBUG_PANEL_ID} .slopskip-comment-list {
       display: grid;
@@ -254,7 +272,7 @@ function ensureStyles(root: HTMLElement): void {
     }
     #${DEBUG_PANEL_ID} .slopskip-comment-card {
       display: grid;
-      grid-template-columns: 56px 1fr;
+      grid-template-columns: 56px minmax(0, 1fr);
       gap: 10px;
       align-items: start;
       padding: 10px;
@@ -271,7 +289,7 @@ function ensureStyles(root: HTMLElement): void {
       font-size: 12px;
       line-height: 1.45;
       color: #2c1d11;
-      word-break: break-word;
+      overflow-wrap: anywhere;
     }
     #${DEBUG_PANEL_ID} .slopskip-empty {
       font-size: 12px;
@@ -286,55 +304,64 @@ function ensureStyles(root: HTMLElement): void {
 
 function bindCloseButton(root: HTMLElement): void {
   root.querySelector<HTMLButtonElement>(".slopskip-close")?.addEventListener("click", () => {
-    // 즉각적으로 안 보이게 처리 (메시지 처리 지연 대비)
     root.style.display = "none";
     void chrome.runtime.sendMessage({
       type: MESSAGE_TYPES.SET_SETTINGS,
       payload: { debugMode: false }
+    }).catch((error) => {
+      if (isContextInvalidatedError(error)) {
+        return;
+      }
+      console.error("[SlopSkip]", error);
     });
   });
 }
 
 function initDraggable(root: HTMLElement): void {
+  dragAbortController?.abort();
+  dragAbortController = new AbortController();
+  const { signal } = dragAbortController;
   let isDragging = false;
-  let startX = 0, startY = 0;
-  let initialLeft = 0, initialTop = 0;
+  let startX = 0;
+  let startY = 0;
+  let initialLeft = 0;
+  let initialTop = 0;
 
-  root.addEventListener("mousedown", (e) => {
-    const target = e.target as HTMLElement;
-    // topbar 영역 부근을 잡았을 때만 이동
+  root.addEventListener("mousedown", (event) => {
+    const target = event.target as HTMLElement;
     if (!target.closest(".slopskip-topbar") && !target.classList.contains("slopskip-shell")) return;
-    if (target.closest("button, a")) return; // x 버튼 클릭은 이동 처리에서 무시
+    if (target.closest("button, a")) return;
 
     isDragging = true;
-    startX = e.clientX;
-    startY = e.clientY;
+    startX = event.clientX;
+    startY = event.clientY;
     const rect = root.getBoundingClientRect();
     initialLeft = rect.left;
     initialTop = rect.top;
-    
-    e.preventDefault(); // 텍스트 선택 방지
-  });
+    event.preventDefault();
+  }, { signal });
 
-  document.addEventListener("mousemove", (e) => {
+  document.addEventListener("mousemove", (event) => {
     if (!isDragging) return;
-    const deltaX = e.clientX - startX;
-    const deltaY = e.clientY - startY;
-    root.style.left = `${initialLeft + deltaX}px`;
-    root.style.top = `${initialTop + deltaY}px`;
+    const nextLeft = Math.max(8, Math.min(window.innerWidth - 80, initialLeft + event.clientX - startX));
+    const nextTop = Math.max(8, Math.min(window.innerHeight - 80, initialTop + event.clientY - startY));
+    root.style.left = `${nextLeft}px`;
+    root.style.top = `${nextTop}px`;
     root.style.right = "auto";
     root.style.bottom = "auto";
     root.style.transform = "none";
-  });
+  }, { signal });
 
   document.addEventListener("mouseup", () => {
     isDragging = false;
-  });
+  }, { signal });
 }
 
 export function renderDebugPanel(snapshot: DebugSnapshot | null, visible: boolean): void {
   let root = document.getElementById(DEBUG_PANEL_ID);
   if (!visible) {
+    dragAbortController?.abort();
+    dragAbortController = undefined;
     root?.remove();
     return;
   }
@@ -348,6 +375,7 @@ export function renderDebugPanel(snapshot: DebugSnapshot | null, visible: boolea
       left: "12px",
       zIndex: "2147483647",
       width: "360px",
+      maxWidth: "calc(100vw - 24px)",
       maxHeight: "78vh",
       overflow: "auto",
       background: "rgba(247,241,227,0.96)",
@@ -362,20 +390,16 @@ export function renderDebugPanel(snapshot: DebugSnapshot | null, visible: boolea
     initDraggable(root);
   }
 
-  // 이전에 닫기 버튼으로 숨긴 상태가 남아있을 수 있으므로 visible=true일 때 복구
-  if (visible) {
-    root.style.display = "block";
-  }
-
+  root.style.display = "block";
   ensureStyles(root);
 
   if (!snapshot?.score) {
     root.innerHTML = `
       <div class="slopskip-shell">
         <div class="slopskip-topbar">
-          <button type="button" class="slopskip-close" aria-label="상세 이유 닫기">×</button>
+          <button type="button" class="slopskip-close" aria-label="Close debug panel">&times;</button>
         </div>
-        <div class="slopskip-card slopskip-empty">아직 디버그 데이터가 없습니다.</div>
+        <div class="slopskip-card slopskip-empty">No debug data yet.</div>
       </div>
     `;
     ensureStyles(root);
@@ -388,18 +412,19 @@ export function renderDebugPanel(snapshot: DebugSnapshot | null, visible: boolea
   const progress = Math.max(0, Math.min(100, Math.round((score.total / Math.max(score.threshold * 2, 1)) * 100)));
   const sourceGroups = aggregateMatches(score.matches);
   const commentCards = summarizeCommentMatches(score.matches);
+  const skipBreadcrumbs = renderSkipBreadcrumbs(snapshot.probe);
   const tags = [
-    `플랫폼: ${snapshot.platform}`,
-    `크리에이터: ${snapshot.creatorHandle || snapshot.creatorKey || "찾지 못함"}`,
-    `댓글 수: ${snapshot.commentCount ?? 0}`,
-    `태그 수: ${snapshot.hashtagCount ?? 0}`,
-    `차단 강도: ${score.sensitivity}`
+    `Platform: ${snapshot.platform}`,
+    `Creator: ${snapshot.creatorHandle || snapshot.creatorKey || "unknown"}`,
+    `Comments: ${snapshot.commentCount ?? 0}`,
+    `Hashtags: ${snapshot.hashtagCount ?? 0}`,
+    `Sensitivity: ${score.sensitivity}`
   ];
 
   root.innerHTML = `
     <div class="slopskip-shell">
       <div class="slopskip-topbar">
-        <button type="button" class="slopskip-close" aria-label="상세 이유 닫기">×</button>
+        <button type="button" class="slopskip-close" aria-label="Close debug panel">&times;</button>
       </div>
 
       <div class="slopskip-card slopskip-hero" style="--ring-color:${tone.color};--ring-progress:${progress};--badge-bg:${tone.bg};--badge-color:${tone.color};">
@@ -410,46 +435,53 @@ export function renderDebugPanel(snapshot: DebugSnapshot | null, visible: boolea
           </div>
         </div>
         <div>
-          <h2 class="slopskip-title">슬롭 위험 대시보드</h2>
-          <p class="slopskip-subtitle">이 게시물이 지금 얼마나 AI 슬롭처럼 보이는지 보여줍니다.</p>
-          <span class="slopskip-badge">${score.shouldSkip ? "차단 실행 상태" : tone.label}</span>
+          <h2 class="slopskip-title">Slop risk readout</h2>
+          <p class="slopskip-subtitle">Shows why the current post does or does not look like AI slop.</p>
+          <span class="slopskip-badge">${score.shouldSkip ? "Filtering state" : tone.label}</span>
         </div>
       </div>
 
       <div class="slopskip-card">
-        <h3 class="slopskip-section-title">빠른 요약</h3>
+        <h3 class="slopskip-section-title">Quick summary</h3>
         <div class="slopskip-meta">
           <div class="slopskip-stat">
-            <div class="slopskip-stat-label">읽은 댓글 수</div>
+            <div class="slopskip-stat-label">Read comments</div>
             <div class="slopskip-stat-value">${snapshot.commentCount ?? 0}</div>
           </div>
           <div class="slopskip-stat">
-            <div class="slopskip-stat-label">해시태그 수</div>
+            <div class="slopskip-stat-label">Hashtags</div>
             <div class="slopskip-stat-value">${snapshot.hashtagCount ?? 0}</div>
           </div>
           <div class="slopskip-stat">
-            <div class="slopskip-stat-label">캡션 길이</div>
+            <div class="slopskip-stat-label">Caption length</div>
             <div class="slopskip-stat-value">${snapshot.captionLength ?? 0}</div>
           </div>
         </div>
       </div>
 
       <div class="slopskip-card">
-        <h3 class="slopskip-section-title">점수 분해</h3>
+        <h3 class="slopskip-section-title">Score breakdown</h3>
         ${renderBars(sourceGroups)}
       </div>
 
       <div class="slopskip-card">
-        <h3 class="slopskip-section-title">댓글 점수 근거</h3>
+        <h3 class="slopskip-section-title">Comment evidence</h3>
         <div class="slopskip-comment-list">
           ${renderCommentCards(commentCards)}
         </div>
       </div>
 
       <div class="slopskip-card">
-        <h3 class="slopskip-section-title">상황 태그</h3>
+        <h3 class="slopskip-section-title">Context tags</h3>
         <div class="slopskip-chip-wrap">
           ${tags.map((tag) => `<span class="slopskip-chip">${escapeHtml(tag)}</span>`).join("")}
+        </div>
+      </div>
+
+      <div class="slopskip-card">
+        <h3 class="slopskip-section-title">Skip breadcrumbs</h3>
+        <div class="slopskip-chip-wrap">
+          ${skipBreadcrumbs}
         </div>
       </div>
     </div>
