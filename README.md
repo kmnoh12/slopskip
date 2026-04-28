@@ -1,182 +1,206 @@
+<div align="center">
+
 # SlopSkip
 
-[한국어 README 보기](./README.ko.md)
+**A local-first Chrome extension that skips likely AI slop in short-form feeds.**
 
-SlopSkip is a Chrome extension that tries to detect likely AI slop in short-form feeds and skip it locally on your machine.
+[![Chrome MV3](https://img.shields.io/badge/Chrome-MV3-4285F4?logo=googlechrome&logoColor=white)](./manifest.json)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript&logoColor=white)](./tsconfig.json)
+[![Local first](https://img.shields.io/badge/privacy-local--first-2E7D32)](#privacy)
+[![Tests](https://img.shields.io/badge/tests-npm%20test-0F766E)](#development)
 
-This project is still an MVP. The current goal is not perfect AI detection. The goal is to build a practical, local-first filter that works well enough on real feeds.
+[한국어](./README.ko.md) · [Install](#quick-start) · [Features](#features) · [Development](#development) · [Docs](#documentation)
 
-## What It Does
+</div>
 
-- Scores short-form posts using visible signals such as:
-  - official AI labels
-  - caption text
-  - hashtags
-  - comment reactions
-  - creator allow/block votes
-- Supports English and Korean-focused heuristics
-- Runs locally in the browser
-- Lets you tune filter strength
-- Lets you mark creators as:
-  - always filter
-  - always allow
+---
 
-## Current Platform Status
+SlopSkip watches supported short-form feeds, scores the active post using visible page signals, and can automatically move past posts that cross your threshold. It is built for people who want a practical, explainable, user-controlled filter—not a remote AI judge.
 
-- TikTok Web
-  - auto scoring
-  - auto skip MVP
-- Instagram Reels Web
-  - reels probe
-  - caption/comment signal collection
-  - ongoing tuning for auto skip behavior
+> **Status:** MVP / active tuning. TikTok Web and Instagram Reels Web are supported, with Reels receiving the most reliability work.
 
-## Why This Exists
+## Table of Contents
 
-Short-form feeds often contain low-effort AI content that users do not want to keep seeing. Most moderation tools are platform-controlled, opaque, or server-based.
+- [Why SlopSkip](#why-slopskip)
+- [Features](#features)
+- [Platform Support](#platform-support)
+- [Quick Start](#quick-start)
+- [How It Works](#how-it-works)
+- [Privacy](#privacy)
+- [Development](#development)
+- [Project Layout](#project-layout)
+- [Reliability Notes](#reliability-notes)
+- [Limitations](#limitations)
+- [Documentation](#documentation)
 
-SlopSkip takes a different approach:
+## Why SlopSkip
 
-- local-first
-- user-controlled
-- explainable enough to tune
-- no cloud OCR or remote LLM dependency in the MVP
+Short-form platforms give users limited control over low-effort AI content. SlopSkip takes the opposite approach:
 
-## How It Works
-
-At a high level:
-
-1. The content script checks which platform page is open.
-2. A platform adapter finds the current active post.
-3. Signals are extracted from the page DOM.
-4. A scoring function combines those signals into a filter score.
-5. If the score passes the threshold, SlopSkip can skip the post.
-6. Popup and options pages let the user inspect and tune behavior.
+- **Local-first:** preferences and learned signals stay in your browser.
+- **Inspectable:** optional debug UI shows how a score was produced.
+- **Tunable:** thresholds, creator choices, and custom phrases are editable.
+- **Recoverable:** import/export, reset, undo, and manual revisit behavior reduce risk.
+- **No remote AI dependency:** the MVP does not send page content to an external LLM or OCR service.
 
 ## Features
 
-- Local scoring based on captions, comments, hashtags, and visible labels
-- Creator-level allow/block voting
-- Adjustable sensitivity
-- Debug view for inspecting why a post was scored a certain way
-- Reels caption auto-expand option
-- Manual revisit pause behavior
+| Area | What you get |
+| --- | --- |
+| Feed filtering | Scores the current post and can auto-skip when the score crosses your threshold. |
+| Reels support | Uses caption/comment collection, active reel detection, skip retries, and transition confirmation. |
+| User control | Choose filter strength, pause on manual revisit, and mark creators as allow/filter. |
+| Custom rules | Add English, Korean, or shared keyword rules from detailed settings. |
+| Explainability | Popup reason chips and an optional debug panel show score sources and skip breadcrumbs. |
+| Local data tools | View, copy, download, import, reset, clear, or undo local preferences. |
+| Stability hardening | Handles extension reloads, stale content scripts, route exits, storage races, and long sessions. |
 
-## Privacy
+## Platform Support
 
-SlopSkip is designed to be local-first.
+| Platform | Status | Notes |
+| --- | --- | --- |
+| TikTok Web | MVP | Scores visible posts and attempts automatic skipping. |
+| Instagram Reels Web | Active tuning | Reads labels, captions, comments, hashtags, creator signals, and uses multiple skip fallbacks. |
+| YouTube Shorts | Planned | Not implemented yet. |
 
-- Settings are stored in `chrome.storage.local`
-- Creator votes are stored locally
-- The MVP does not send page content to a remote AI service
-- No remote OCR pipeline is used in the current MVP
-
-## Permissions
-
-The extension currently uses:
-
-- `storage`
-- `https://www.tiktok.com/*`
-- `https://www.instagram.com/*`
-
-## Installation
-
-1. Install dependencies:
+## Quick Start
 
 ```bash
 npm install
-```
-
-2. Build the extension:
-
-```bash
 npm run build
 ```
 
-3. Open Chrome and go to:
+Then load the extension in Chrome:
+
+1. Open `chrome://extensions`.
+2. Enable **Developer mode**.
+3. Click **Load unpacked**.
+4. Select the `dist` folder.
+5. Refresh any open TikTok or Instagram tabs after rebuilding.
+
+## Usage
+
+1. Open TikTok Web or Instagram Reels Web.
+2. Click the SlopSkip extension icon.
+3. Turn **Auto-filter** on.
+4. Pick a filter strength.
+5. Optional: enable **Show reasons** to inspect scoring.
+6. Use creator actions to always allow or more aggressively filter the current creator.
+
+For deeper tuning, open **Detailed settings** from the popup.
+
+## How It Works
 
 ```text
-chrome://extensions
+Supported page
+  → platform adapter finds active post
+  → visible signals are extracted
+  → scoring engine combines heuristics + local rules + feedback
+  → threshold check decides whether to skip
+  → popup/options/debug UI explain and tune the behavior
 ```
 
-4. Turn on Developer mode
-5. Click `Load unpacked`
-6. Select:
+Signals currently include:
 
-```text
-dist
-```
+- official AI labels or disclosure text
+- captions and hashtags
+- comment reactions around AI/fake/slop/render/CGI cues
+- Korean and English phrase patterns
+- contradiction signals such as “not AI”
+- creator allow/filter votes
+- learned local phrase scores
+- custom keyword lists
+
+## Privacy
+
+SlopSkip is designed to keep control local.
+
+- Settings are stored in `chrome.storage.local`.
+- Creator choices and learned phrase scores stay in the browser.
+- Custom keyword rules stay in the browser.
+- Page content is not sent to a remote AI service in the MVP.
+- No remote OCR or remote LLM pipeline is used in the MVP.
+
+## Permissions
+
+| Permission | Why it is needed |
+| --- | --- |
+| `storage` | Save local settings, creator choices, learned phrase scores, and custom rules. |
+| `https://www.tiktok.com/*` | Read visible feed signals and attempt skip interactions on TikTok Web. |
+| `https://www.instagram.com/*` | Read visible Reels signals and attempt skip interactions on Instagram Web. |
 
 ## Development
 
-Build once:
-
 ```bash
+npm install
 npm run build
-```
-
-Watch mode:
-
-```bash
 npm run watch
-```
-
-Type check:
-
-```bash
 npm run typecheck
+npm test
 ```
 
-## Project Structure
+| Command | Purpose |
+| --- | --- |
+| `npm run build` | Builds the Chrome extension into `dist`. |
+| `npm run watch` | Rebuilds during development. |
+| `npm run typecheck` | Runs TypeScript checks. |
+| `npm run test:scoring` | Runs scoring smoke tests. |
+| `npm run test:storage` | Runs storage migration and consistency tests. |
+| `npm test` | Runs typecheck, scoring tests, and storage tests. |
 
-- `src/content`
-  - content scripts
-  - platform adapters
-  - scoring
-  - skip logic
-  - toast/debug UI
-- `src/background`
-  - background entry
-- `src/popup`
-  - quick controls
-- `src/options`
-  - detailed settings
-- `src/shared`
-  - shared constants, storage helpers, i18n helpers
-- `docs`
-  - architecture notes
-  - selector notes
-  - testing notes
+## Project Layout
 
-## Important Notes
+```text
+src/background      background message handling
+src/content         content script, adapters, scoring, skip logic, debug UI
+src/options         detailed settings dashboard
+src/popup           quick controls popup
+src/shared          constants, types, storage, i18n, shared UI helpers
+scripts             build and smoke-test scripts
+docs                architecture, selectors, Reels probe, and testing notes
+_locales            Chrome i18n messages
+public              extension assets copied into dist
+```
 
-- This is heuristic-based filtering, not guaranteed truth detection.
-- False positives and false negatives are both possible.
-- Instagram Reels behavior is still being tuned carefully because feed UI state is fragile.
-- If you enable automatic caption expansion, it may briefly affect what the user sees.
+## Reliability Notes
 
-## Roadmap
+SlopSkip includes safeguards for messy real-world feed behavior:
 
-- Improve Reels skip stability
-- Improve caption and comment signal quality
-- Better creator reputation tools
-- Better import/export for local preferences
-- YouTube Shorts adapter
-- More language coverage
+- extension-context invalidation cleanup after reloads
+- stale content-script instance detection
+- Reels transition confirmation and retry scheduling
+- fallback skip tactics for Reels controls, keyboard, wheel, and scroll
+- storage write serialization to avoid lost local updates
+- delayed reads so UI does not observe stale state mid-write
+- route-exit cleanup so scores and debug panels do not linger outside supported pages
+- capped in-memory item tracking for long browsing sessions
+- import sanitization for thresholds, rules, votes, and learned scores
 
-## Docs
+## Limitations
 
-- `docs/architecture.md`
-- `docs/plan.md`
-- `docs/selectors.md`
-- `docs/reels-probe-report.md`
-- `docs/testing.md`
+- Heuristics can produce false positives and false negatives.
+- Platform DOM changes can break selectors or skip behavior.
+- Reels transitions can fail when Instagram intercepts scroll or key events.
+- Comment collection depends on what the current page UI exposes.
+- SlopSkip is a personal filtering tool, not a moderation system or truth detector.
 
-## Language Notes
+## Documentation
 
-GitHub does not automatically show a different README based on the visitor's language.
+- [`docs/architecture.md`](./docs/architecture.md)
+- [`docs/plan.md`](./docs/plan.md)
+- [`docs/selectors.md`](./docs/selectors.md)
+- [`docs/reels-probe-report.md`](./docs/reels-probe-report.md)
+- [`docs/testing.md`](./docs/testing.md)
 
-For that reason:
+## Contributing
 
-- `README.md` is the English version
-- `README.ko.md` is the Korean version
+This repository is early-stage and intentionally compact. Before sending a change:
+
+1. Keep filtering behavior explainable and user-controlled.
+2. Prefer local-first storage and avoid remote content processing.
+3. Run `npm test` and `npm run build`.
+4. Document user-visible behavior changes in this README or `docs/`.
+
+## License
+
+No license file is currently included. If you plan to reuse or redistribute this project, open an issue or add a license first.
